@@ -237,7 +237,7 @@ input:focus, select:focus { border-color: var(--brass); }
 }
 .quest-row:hover { background: var(--panel-2); }
 .quest-name { font-weight: 600; }
-.quest-row select { padding: 4px 6px; font-size: 12px; }
+.quest-row select { width: 100%; padding: 4px 6px; font-size: 12px; }
 .quest-body { padding: 4px 16px 12px 112px; color: var(--text-muted); }
 .quest-body ul { margin: 0 0 8px; padding-left: 18px; }
 .quest-body li { margin: 4px 0; }

@@ -1,4 +1,6 @@
 import { app, desktopCapturer, nativeImage, screen } from 'electron'
+import { writeFile } from 'node:fs/promises'
+import { join } from 'node:path'
 import { createWorker, type Worker } from 'tesseract.js'
 import type { Item } from '@shared/types'
 
@@ -8,8 +10,9 @@ import type { Item } from '@shared/types'
 let worker: Promise<Worker> | null = null
 
 function getWorker(): Promise<Worker> {
-  // языковые данные скачиваются один раз и кэшируются в папке приложения
-  worker ??= createWorker(['rus', 'eng'], 1, { cachePath: app.getPath('userData') })
+  // языковые данные скачиваются один раз и кэшируются в папке приложения.
+  // Только русский: вместе с английским OCR путает похожие буквы (В/B, а/a)
+  worker ??= createWorker('rus', 1, { cachePath: app.getPath('userData') })
   return worker
 }
 
@@ -41,7 +44,10 @@ async function captureAroundCursor(): Promise<Buffer> {
     bmp[i] = bmp[i + 1] = bmp[i + 2] = v
     bmp[i + 3] = 255
   }
-  return nativeImage.createFromBitmap(bmp, { width, height }).toPNG()
+  const png = nativeImage.createFromBitmap(bmp, { width, height }).toPNG()
+  // последний снимок сохраняем — по нему видно, что именно читал OCR
+  writeFile(join(app.getPath('userData'), 'last-scan.png'), png).catch(() => {})
+  return png
 }
 
 function clampRect(r: Electron.Rectangle, size: Electron.Size): Electron.Rectangle {
@@ -66,10 +72,16 @@ export function warmUpOcr(): void {
 
 // ---------- поиск предмета по тексту ----------
 
+// латинские буквы, которые OCR путает с кириллицей, приводим к одному виду
+const LOOKALIKE: Record<string, string> = {
+  a: 'а', b: 'в', c: 'с', e: 'е', h: 'н', k: 'к', m: 'м', o: 'о', p: 'р', t: 'т', x: 'х', y: 'у'
+}
+
 const norm = (s: string) =>
   s
     .toLowerCase()
     .replace(/ё/g, 'е')
+    .replace(/[abcehkmoptxy]/g, (c) => LOOKALIKE[c])
     .replace(/[^a-zа-я0-9]+/g, ' ')
     .trim()
 
@@ -100,10 +112,14 @@ export function matchItems(items: Item[], lines: string[], limit = 5): Item[] {
     let best = 0
     for (const q of queries) {
       let s = Math.max(similarity(q, name), similarity(q, short))
-      if (name.includes(q) || q.includes(name)) s = Math.max(s, 0.8 + 0.2 * (Math.min(q.length, name.length) / Math.max(q.length, name.length)))
+      // совпадение подстрокой засчитываем только для достаточно длинных названий,
+      // иначе короткие имена вроде «к» находятся в любом мусоре
+      if (Math.min(q.length, name.length) >= 4 && (name.includes(q) || q.includes(name))) {
+        s = Math.max(s, 0.8 + 0.2 * (Math.min(q.length, name.length) / Math.max(q.length, name.length)))
+      }
       best = Math.max(best, s)
     }
-    if (best >= 0.55) scored.push({ item, score: best })
+    if (best >= 0.6) scored.push({ item, score: best })
   }
   return scored.sort((a, b) => b.score - a.score).slice(0, limit).map((s) => s.item)
 }

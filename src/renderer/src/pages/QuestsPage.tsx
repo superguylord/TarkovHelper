@@ -97,7 +97,7 @@ export function QuestsPage({ s }: { s: AppState }) {
               {t.kappaRequired && <span className="tag tag-brass">Kappa</span>}
               <span className="muted">{t.trader}</span>
               <span className="muted">{mapName(t.map)}</span>
-              <span className="muted">ур. {t.minPlayerLevel}</span>
+              <span className="muted">{t.minPlayerLevel > 1 ? `ур. ${t.minPlayerLevel}` : ''}</span>
               <select
                 value={progress.tasks[t.id] ?? ''}
                 onClick={(e) => e.stopPropagation()}
