@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import type { TaskStatus } from '@shared/types'
 import type { AppState } from '../useAppState'
 import { QUEST_STATE_LABEL, questState, type QuestState } from '../questLogic'
+import { QuestDetails } from '../components/QuestDetails'
 
 type Filter = 'active' | 'available' | 'completed' | 'all'
 const FILTERS: [Filter, string][] = [
@@ -111,19 +112,7 @@ export function QuestsPage({ s }: { s: AppState }) {
             </div>
             {open === t.id && (
               <div className="quest-body">
-                <ul>
-                  {t.objectives.map((o) => (
-                    <li key={o.id} className={o.optional ? 'muted' : ''}>
-                      {o.description}
-                      {o.points.length > 0 && <span className="tag tag-green">на карте</span>}
-                    </li>
-                  ))}
-                </ul>
-                {t.wikiLink && (
-                  <a href={t.wikiLink} target="_blank" rel="noreferrer">
-                    Открыть в вики
-                  </a>
-                )}
+                <QuestDetails task={t} progress={progress} />
               </div>
             )}
           </div>

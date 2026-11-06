@@ -15,7 +15,7 @@ export function useAppState(): AppState {
   const [s, setS] = useState<AppState>({
     data: null,
     live: null,
-    progress: { playerLevel: 1, tasks: {} },
+    progress: { playerLevel: 1, tasks: {}, objectives: {} },
     settings: null,
     price: null,
     overlayMode: 'hidden'

@@ -8,6 +8,7 @@ import { fetchGameData, loadCached } from './tarkovData'
 import { LogWatcher } from './logWatcher'
 import { ScreenshotWatcher } from './screenshotWatcher'
 import { matchItems, scanPrice, warmUpOcr } from './priceScanner'
+import { getGuide } from './wikiGuide'
 
 // ---------- состояние ----------
 
@@ -34,7 +35,7 @@ const defaultSettings = (): Settings => ({
 })
 
 let settings: Settings
-let progress: Progress = readJson<Progress>('progress.json', { playerLevel: 1, tasks: {} })
+let progress: Progress = readJson<Progress>('progress.json', { playerLevel: 1, tasks: {}, objectives: {} })
 let data: GameData | null = null
 let overlayMode: OverlayMode = 'hidden'
 const live: LiveState = {
@@ -268,6 +269,21 @@ function registerIpc(): void {
     writeJson('progress.json', progress)
     send('progress', progress)
     return progress
+  })
+  ipcMain.handle('progress:objective', (_e, id: string, done: boolean) => {
+    if (done) progress.objectives[id] = true
+    else delete progress.objectives[id]
+    writeJson('progress.json', progress)
+    send('progress', progress)
+    return progress
+  })
+  ipcMain.handle('guide:get', async (_e, name: string) => {
+    try {
+      return await getGuide(name)
+    } catch (e) {
+      console.warn('Гайд не загрузился:', e)
+      return null
+    }
   })
   ipcMain.handle('progress:import', () => {
     const found = logs.importAll()

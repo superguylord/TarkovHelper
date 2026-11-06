@@ -1,29 +1,53 @@
-import type { GameData, MapInfo, Progress } from '@shared/types'
+import type { GameData, MapInfo, Progress, Task, TaskObjective } from '@shared/types'
 import type { MapMarker } from './components/MapView'
 import { questState } from './questLogic'
 
-const EXTRACT_KIND: Record<string, MapMarker['kind']> = {
-  pmc: 'extract-pmc',
-  scav: 'extract-scav',
-  shared: 'extract-shared'
+export type Faction = 'pmc' | 'scav'
+
+export interface MarkerOptions {
+  quests: boolean
+  available: boolean // показывать и ещё не взятые, но доступные квесты
+  extracts: boolean
+  faction: Faction
+  selectedTask: string | null
 }
 
-/** Маркеры для карты: точки активных квестов и выходы. */
-export function buildMarkers(
-  data: GameData,
-  map: MapInfo,
-  progress: Progress,
-  opts: { quests: boolean; available: boolean; extracts: boolean }
-): MapMarker[] {
+// задания на убийство не привязаны к точке — маркер для них только мешает
+const isKill = (o: TaskObjective) => o.type === 'shoot'
+
+const objectiveOnMap = (o: TaskObjective, map: string) =>
+  o.points.some((p) => p.map === map) || o.maps.includes(map)
+
+/** Квесты, по которым на этой карте есть что делать (с учётом отмеченных целей). */
+export function questsOnMap(data: GameData, map: MapInfo, progress: Progress, available: boolean): Task[] {
+  return data.tasks.filter((t) => {
+    const st = questState(t, progress)
+    if (st !== 'active' && !(available && st === 'available')) return false
+    return t.objectives.some(
+      (o) => !progress.objectives[o.id] && (objectiveOnMap(o, map.normalizedName) || t.map === map.normalizedName)
+    )
+  })
+}
+
+/** Маркеры для карты: точки квестов (кроме убийств и выполненных целей) и выходы. */
+export function buildMarkers(data: GameData, map: MapInfo, progress: Progress, opts: MarkerOptions): MapMarker[] {
   const out: MapMarker[] = []
   if (opts.quests) {
-    for (const task of data.tasks) {
-      const st = questState(task, progress)
-      if (st !== 'active' && !(opts.available && st === 'available')) continue
+    for (const task of questsOnMap(data, map, progress, opts.available)) {
+      const selected = task.id === opts.selectedTask
       for (const obj of task.objectives) {
+        if (isKill(obj) || progress.objectives[obj.id]) continue
         obj.points.forEach((p, i) => {
           if (p.map !== map.normalizedName) return
-          out.push({ id: `${obj.id}-${i}`, point: p, label: task.name, detail: obj.description, kind: 'quest' })
+          out.push({
+            id: `${obj.id}-${i}`,
+            point: p,
+            outline: p.outline,
+            label: task.name,
+            detail: obj.description,
+            kind: selected ? 'quest-selected' : 'quest',
+            taskId: task.id
+          })
         })
       }
     }
@@ -31,11 +55,13 @@ export function buildMarkers(
   if (opts.extracts) {
     map.extracts.forEach((e, i) => {
       if (!e.position) return
+      if (e.faction !== 'shared' && e.faction !== 'transit' && e.faction !== opts.faction) return
       out.push({
         id: `ex-${i}`,
         point: e.position,
         label: e.name,
-        kind: EXTRACT_KIND[e.faction] ?? 'extract-shared'
+        detail: e.note,
+        kind: e.faction === 'transit' ? 'transit' : e.faction === 'shared' ? 'extract-shared' : 'extract'
       })
     })
   }

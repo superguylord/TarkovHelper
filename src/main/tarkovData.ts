@@ -37,11 +37,22 @@ async function getDump(mode: GameMode, name: string): Promise<{ data: any; ru: D
 
 const tr = (ru: Dict, key: string | undefined) => (key ? (ru[key] ?? key) : '')
 
-async function fetchMaps(mode: GameMode): Promise<{ maps: MapInfo[]; mapIdToName: Dict }> {
-  const [geo, { data, ru }] = await Promise.all([getJson(MAPS_JSON), getDump(mode, 'maps')])
+async function fetchMapsRaw(mode: GameMode): Promise<{ geo: any[]; data: any; ru: Dict }> {
+  const [geo, dump] = await Promise.all([getJson(MAPS_JSON), getDump(mode, 'maps')])
+  return { geo, ...dump }
+}
+
+function buildMaps(
+  { geo, data, ru }: { geo: any[]; data: any; ru: Dict },
+  itemName: (id: string) => string
+): { maps: MapInfo[]; mapIdToName: Dict } {
   const all = Object.values<any>(data.maps)
   const mapIdToName: Dict = {}
-  for (const m of all) mapIdToName[m.id] = geoName(m.normalizedName)
+  const mapTitle: Dict = {}
+  for (const m of all) {
+    mapIdToName[m.id] = geoName(m.normalizedName)
+    mapTitle[m.id] = tr(ru, m.name)
+  }
 
   const maps: MapInfo[] = []
   for (const group of geo as any[]) {
@@ -54,8 +65,21 @@ async function fetchMaps(mode: GameMode): Promise<{ maps: MapInfo[]; mapIdToName
     const extracts: Extract[] = (main.extracts ?? []).map((e: any) => ({
       name: tr(ru, e.name),
       faction: e.faction,
-      position: e.position ?? null
+      position: e.position ?? null,
+      note: e.transferItem
+        ? e.transferItem.item === ROUBLES
+          ? `Плата: ${e.transferItem.count.toLocaleString('ru-RU')} ₽`
+          : `Нужен предмет: ${itemName(e.transferItem.item)}${e.transferItem.count > 1 ? ` ×${e.transferItem.count}` : ''}`
+        : undefined
     }))
+    // переходы на другие локации тоже выводят из рейда
+    for (const t of main.transits ?? []) {
+      extracts.push({
+        name: tr(ru, t.description) || `Переход: ${mapTitle[t.map] ?? ''}`,
+        faction: 'transit',
+        position: t.position ?? null,
+      })
+    }
     maps.push({
       normalizedName: group.normalizedName,
       name: tr(ru, main.name),
@@ -76,7 +100,71 @@ async function fetchMaps(mode: GameMode): Promise<{ maps: MapInfo[]; mapIdToName
   return { maps, mapIdToName }
 }
 
-function toTask(t: any, ru: Dict, traders: Dict, mapName: Dict): Task {
+const ROUBLES = '5449016a4bdc2d6f028b456f'
+
+const COMPARE: Dict = { '>=': 'не менее', '<=': 'не более', '>': 'более', '<': 'менее', '==': 'ровно' }
+
+/** Подсказки к цели квеста из структурированных данных: что взять, куда идти, на что смотреть. */
+function objectiveHints(o: any, ru: Dict, name: (id: string) => string): string[] {
+  const h: string[] = []
+  const ids = (arr: any[] | undefined): string[] =>
+    (arr ?? []).flat().map((x: any) => (typeof x === 'string' ? x : x?.id)).filter(Boolean)
+  const list = (arr: any[] | undefined) => {
+    const all = ids(arr)
+    const shown = all.slice(0, 4).map(name).join(', ')
+    return all.length > 4 ? `${shown} и ещё ${all.length - 4}` : shown
+  }
+  const keys = (o.requiredKeys ?? []) as string[][]
+  if (keys.length) h.push(`Нужен ключ: ${keys.map((alt) => alt.map(name).join(' или ')).join('; ')}`)
+
+  switch (o.type) {
+    case 'findItem':
+    case 'giveItem':
+      if (ids(o.items).length) h.push(`Предмет: ${list(o.items)}${o.count > 1 ? ` ×${o.count}` : ''}`)
+      if (o.foundInRaid) h.push('Только найденные в рейде (FIR) — купленные не засчитаются')
+      if (o.minDurability > 0 || (o.maxDurability ?? 100) < 100) h.push(`Прочность ${o.minDurability}–${o.maxDurability}%`)
+      break
+    case 'plantItem':
+      h.push(`Взять с собой: ${list(o.items)}${o.count > 1 ? ` ×${o.count}` : ''}`)
+      break
+    case 'mark':
+      if (o.markerItem) h.push(`Взять с собой: ${name(o.markerItem)}`)
+      break
+    case 'findQuestItem':
+      if (o.questItem) h.push(`Подобрать «${name(o.questItem)}» и выйти с ним живым`)
+      if ((o.possibleLocations ?? []).reduce((n: number, l: any) => n + (l.positions?.length ?? 0), 0) > 1) {
+        h.push('Предмет появляется в одном из отмеченных мест — проверьте все')
+      }
+      break
+    case 'plantQuestItem':
+      if (o.questItem) h.push(`Заложить «${name(o.questItem)}»`)
+      break
+    case 'useItem':
+      if (ids(o.useAny).length) h.push(`Использовать: ${list(o.useAny)}`)
+      break
+    case 'extract':
+      h.push(o.exitName ? `Выйти через: ${tr(ru, o.exitName)}` : 'Выжить и выйти из рейда')
+      break
+    case 'buildWeapon':
+      if (o.item) h.push(`Собрать: ${name(o.item)}`)
+      break
+    case 'shoot': {
+      const targets = (o.targetNames ?? []).map((t: string) => (t === 'Any' ? 'любая' : tr(ru, t))).join(', ')
+      if (targets) h.push(`Цель: ${targets}${o.count > 1 ? ` ×${o.count}` : ''}`)
+      if (o.distance?.value > 0) h.push(`Дистанция ${COMPARE[o.distance.compareMethod] ?? ''} ${o.distance.value} м`)
+      if (ids(o.usingWeapon).length) h.push(`Оружие: ${list(o.usingWeapon)}`)
+      if (ids(o.usingWeaponMods).length) h.push(`Обвес: ${list(o.usingWeaponMods)}`)
+      if ((o.bodyParts ?? []).length) h.push(`Попадание: ${o.bodyParts.map((b: string) => tr(ru, b)).join(', ')}`)
+      if (ids(o.wearing).length) h.push(`Надеть: ${list(o.wearing)}`)
+      if (ids(o.notWearing).length) h.push(`Нельзя надевать: ${list(o.notWearing)}`)
+      if (o.timeFromHour || o.timeUntilHour) h.push(`Время в игре: с ${o.timeFromHour}:00 до ${o.timeUntilHour}:00`)
+      break
+    }
+  }
+  return h
+}
+
+function toTask(t: any, ru: Dict, traders: Dict, mapName: Dict, name: (id: string) => string): Task {
   return {
     id: t.id,
     name: tr(ru, t.name),
@@ -86,10 +174,13 @@ function toTask(t: any, ru: Dict, traders: Dict, mapName: Dict): Task {
     kappaRequired: !!t.kappaRequired,
     wikiLink: t.wikiLink ?? '',
     requires: (t.taskRequirements ?? []).map((r: any) => ({ taskId: r.task, status: r.status ?? [] })),
+    neededKeys: (t.neededKeys ?? []).flatMap((k: any) => (k.keys ?? []).map(name)),
     objectives: (t.objectives ?? []).map((o: any) => {
       const points: MapPoint[] = []
       for (const z of o.zones ?? []) {
-        if (z.position && mapName[z.map]) points.push({ map: mapName[z.map], ...z.position })
+        if (!z.position || !mapName[z.map]) continue
+        const outline = (z.outline ?? []).map((p: any) => ({ x: p.x, z: p.z }))
+        points.push({ map: mapName[z.map], ...z.position, ...(outline.length > 2 ? { outline } : {}) })
       }
       for (const loc of o.possibleLocations ?? []) {
         if (!mapName[loc.map]) continue
@@ -101,7 +192,8 @@ function toTask(t: any, ru: Dict, traders: Dict, mapName: Dict): Task {
         description: tr(ru, o.description),
         optional: !!o.optional,
         maps: (o.maps ?? []).map((id: string) => mapName[id]).filter(Boolean),
-        points
+        points,
+        hints: objectiveHints(o, ru, name)
       }
     })
   }
@@ -141,7 +233,8 @@ function itemsUsedInTasks(tasks: any[]): Map<string, string[]> {
   return used
 }
 
-const cacheName = (mode: GameMode) => `gamedata-${mode}.json`
+// версия в имени: при смене формата данных старый кэш просто не читается
+const cacheName = (mode: GameMode) => `gamedata-v2-${mode}.json`
 
 export function loadCached(mode: GameMode): GameData | null {
   const d = readJson<GameData | null>(cacheName(mode), null)
@@ -158,7 +251,7 @@ export async function fetchGameData(
 ): Promise<{ data: GameData; complete: boolean }> {
   const [traders, maps, tasks, items] = await Promise.allSettled([
     getDump(mode, 'traders'),
-    fetchMaps(mode),
+    fetchMapsRaw(mode),
     getDump(mode, 'tasks'),
     getDump(mode, 'items')
   ])
@@ -171,9 +264,17 @@ export async function fetchGameData(
   if (traders.status === 'fulfilled') {
     for (const t of Object.values<any>(traders.value.data)) traderNames[t.id] = tr(traders.value.ru, t.name)
   }
-  const mapsV = maps.status === 'fulfilled' ? maps.value : null
   const tasksV = tasks.status === 'fulfilled' ? tasks.value : null
   const itemsV = items.status === 'fulfilled' ? items.value : null
+
+  // русские названия предметов и квестовых предметов — для подсказок и условий выходов
+  const names = new Map<string, string>()
+  for (const i of same?.items ?? []) names.set(i.id, i.name)
+  if (itemsV) for (const i of Object.values<any>(itemsV.data.items)) names.set(i.id, tr(itemsV.ru, i.name))
+  if (tasksV) for (const q of Object.values<any>(tasksV.data.questItems ?? {})) names.set(q.id, tr(tasksV.ru, q.name))
+  const itemName = (id: string) => names.get(id) ?? id
+
+  const mapsV = maps.status === 'fulfilled' ? buildMaps(maps.value, itemName) : null
   const rawTasks = tasksV ? Object.values<any>(tasksV.data.tasks) : []
   const usedIn = itemsUsedInTasks(rawTasks)
   // без торговцев и карт квесты получатся неполными — тогда оставляем прошлые
@@ -186,7 +287,7 @@ export async function fetchGameData(
     gameMode: mode,
     maps: mapsV ? mapsV.maps : (same?.maps ?? []),
     tasks: tasksOk
-      ? rawTasks.map((t) => toTask(t, tasksV!.ru, traderNames, mapsV!.mapIdToName))
+      ? rawTasks.map((t) => toTask(t, tasksV!.ru, traderNames, mapsV!.mapIdToName, itemName))
       : (same?.tasks ?? []),
     items: itemsOk
       ? Object.values<any>(itemsV!.data.items).map((i) => toItem(i, itemsV!.ru, traderNames, usedIn))

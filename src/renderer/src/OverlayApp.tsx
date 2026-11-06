@@ -4,6 +4,7 @@ import { Logo, StatusChips, TABS, TabContent, type Tab } from './MainApp'
 import { MapView } from './components/MapView'
 import { PriceCard } from './components/PriceCard'
 import { buildMarkers } from './mapMarkers'
+import { loadFaction } from './pages/MapPage'
 
 const PRICE_TOAST_MS = 8000
 
@@ -31,7 +32,13 @@ export function OverlayApp() {
 
   const map = data?.maps.find((m) => m.normalizedName === live?.currentMap)
   const markers = useMemo(
-    () => (data && map ? buildMarkers(data, map, progress, { quests: true, available: false, extracts: true }) : []),
+    () => (data && map ? buildMarkers(data, map, progress, {
+            quests: true,
+            available: false,
+            extracts: true,
+            faction: loadFaction(),
+            selectedTask: null
+          }) : []),
     [data, map, progress]
   )
   const showPrice = price && now - price.at < PRICE_TOAST_MS && overlayMode !== 'full'

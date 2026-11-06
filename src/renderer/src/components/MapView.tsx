@@ -37,9 +37,11 @@ function mapBounds(map: MapInfo): L.LatLngBounds | undefined {
 export interface MapMarker {
   id: string
   point: Point3
+  outline?: { x: number; z: number }[] // контур зоны квеста
   label: string
   detail?: string
-  kind: 'quest' | 'extract-pmc' | 'extract-scav' | 'extract-shared'
+  kind: 'quest' | 'quest-selected' | 'extract' | 'extract-shared' | 'transit'
+  taskId?: string
 }
 
 interface Props {
@@ -47,11 +49,13 @@ interface Props {
   markers: MapMarker[]
   position: PlayerPosition | null
   compact?: boolean // мини-карта: без управления, центр на игроке
+  focus?: Point3[] | null // показать эти точки целиком (например, выбранный квест)
+  onMarkerClick?: (marker: MapMarker) => void
 }
 
 const svgCache = new Map<string, Promise<string>>()
 
-export function MapView({ map, markers, position, compact }: Props) {
+export function MapView({ map, markers, position, compact, focus, onMarkerClick }: Props) {
   const el = useRef<HTMLDivElement>(null)
   const lmap = useRef<L.Map | null>(null)
   const markerLayer = useRef<L.LayerGroup | null>(null)
@@ -87,7 +91,8 @@ export function MapView({ map, markers, position, compact }: Props) {
         for (const id of map.hiddenSvgLayers ?? []) {
           svg.querySelector(`[id="${id}"]`)?.setAttribute('display', 'none')
         }
-        L.svgOverlay(svg, bounds, { className: 'map-svg' }).addTo(m)
+        // подложка — в слой тайлов, иначе SVG ляжет поверх маркеров (он грузится позже них)
+        L.svgOverlay(svg, bounds, { className: 'map-svg', pane: 'tilePane' }).addTo(m)
       }).catch(() => svgCache.delete(map.svgPath!))
     } else if (map.tilePath) {
       L.tileLayer(map.tilePath, {
@@ -116,18 +121,41 @@ export function MapView({ map, markers, position, compact }: Props) {
     const layer = markerLayer.current
     if (!layer) return
     layer.clearLayers()
-    for (const mk of markers) {
+    const isQuest = (k: MapMarker['kind']) => k === 'quest' || k === 'quest-selected'
+    // выбранный квест рисуем последним, чтобы он был поверх остальных
+    const sorted = [...markers].sort((a, b) => Number(a.kind === 'quest-selected') - Number(b.kind === 'quest-selected'))
+    for (const mk of sorted) {
+      if (mk.outline) {
+        layer.addLayer(
+          L.polygon(
+            mk.outline.map((p) => L.latLng(p.z, p.x)),
+            { className: `zone zone-${mk.kind}`, interactive: false }
+          )
+        )
+      }
       const marker = L.circleMarker(toLatLng(mk.point), {
-        radius: mk.kind === 'quest' ? 7 : 6,
+        radius: mk.kind === 'quest-selected' ? 9 : isQuest(mk.kind) ? 7 : 6,
         className: `mk mk-${mk.kind}`
       })
-      marker.bindTooltip(
-        `<b>${escapeHtml(mk.label)}</b>${mk.detail ? `<br>${escapeHtml(mk.detail)}` : ''}`,
-        { className: 'mk-tip', direction: 'top', permanent: mk.kind !== 'quest' && !compact }
-      )
+      const detail = mk.detail ? (isQuest(mk.kind) ? `<br>${escapeHtml(mk.detail)}` : `<br><small>${escapeHtml(mk.detail)}</small>`) : ''
+      const tip = `<b>${escapeHtml(mk.label)}</b>${detail}`
+      marker.bindTooltip(tip, {
+        className: `mk-tip${isQuest(mk.kind) ? '' : ' mk-tip-exit'}`,
+        direction: 'top',
+        permanent: !isQuest(mk.kind) && !compact
+      })
+      if (onMarkerClick) marker.on('click', () => onMarkerClick(mk))
       layer.addLayer(marker)
     }
-  }, [markers, map, compact])
+  }, [markers, map, compact, onMarkerClick])
+
+  // приблизить к выбранным точкам
+  useEffect(() => {
+    const m = lmap.current
+    if (!m || !focus?.length) return
+    const b = L.latLngBounds(focus.map(toLatLng))
+    m.flyToBounds(b.pad(0.4), { maxZoom: (map.maxZoom ?? 6) - 1, duration: 0.6 })
+  }, [focus, map])
 
   // позиция игрока: стрелка, повёрнутая по направлению взгляда
   useEffect(() => {
@@ -143,11 +171,12 @@ export function MapView({ map, markers, position, compact }: Props) {
     const a = m.latLngToLayerPoint(here)
     const b = m.latLngToLayerPoint(ahead)
     const angle = (Math.atan2(b.y - a.y, b.x - a.x) * 180) / Math.PI + 90
+    // конус обзора: широкий сектор в сторону взгляда, его не спутать с точкой
     const icon = L.divIcon({
       className: 'player-icon',
-      html: `<div class="player-arrow" style="transform: rotate(${angle}deg)"></div>`,
-      iconSize: [34, 34],
-      iconAnchor: [17, 17]
+      html: `<div class="player-cone" style="transform: rotate(${angle}deg)">${CONE_SVG}</div>`,
+      iconSize: [96, 96],
+      iconAnchor: [48, 48]
     })
     layer.addLayer(L.marker(here, { icon, interactive: false }))
     if (compact) m.setView(here, Math.max(m.getZoom(), (map.maxZoom ?? 6) - 2))
@@ -156,6 +185,15 @@ export function MapView({ map, markers, position, compact }: Props) {
 
   return <div ref={el} className={compact ? 'map map-compact' : 'map'} />
 }
+
+const CONE_SVG = `<svg viewBox="0 0 96 96" width="96" height="96">
+  <defs><radialGradient id="cone-g" cx="48" cy="48" r="46" gradientUnits="userSpaceOnUse">
+    <stop offset="0" stop-color="#dfbd70" stop-opacity="0.85"/><stop offset="1" stop-color="#dfbd70" stop-opacity="0"/>
+  </radialGradient></defs>
+  <path d="M48 48 L21 6 A46 46 0 0 1 75 6 Z" fill="url(#cone-g)"/>
+  <circle cx="48" cy="48" r="8" fill="#dfbd70" stroke="#0a0f0c" stroke-width="2.5"/>
+  <path d="M48 36 L53 45 L43 45 Z" fill="#0a0f0c"/>
+</svg>`
 
 function escapeHtml(s: string): string {
   return s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!)

@@ -10,12 +10,14 @@ export interface Point3 {
 
 export interface MapPoint extends Point3 {
   map: string // normalizedName карты
+  outline?: { x: number; z: number }[] // контур зоны, если он известен
 }
 
 export interface Extract {
   name: string
-  faction: string // pmc | scav | shared
+  faction: string // pmc | scav | shared | transit
   position: Point3 | null
+  note?: string // условие выхода: оплата, предмет, переход на другую карту
 }
 
 export interface MapInfo {
@@ -42,6 +44,7 @@ export interface TaskObjective {
   optional: boolean
   maps: string[]
   points: MapPoint[]
+  hints: string[] // что взять с собой и на что обратить внимание
 }
 
 export interface Task {
@@ -53,6 +56,7 @@ export interface Task {
   kappaRequired: boolean
   wikiLink: string
   requires: { taskId: string; status: string[] }[]
+  neededKeys: string[] // ключи, которые понадобятся
   objectives: TaskObjective[]
 }
 
@@ -83,6 +87,7 @@ export type TaskStatus = 'active' | 'completed' | 'failed'
 export interface Progress {
   playerLevel: number
   tasks: Record<string, TaskStatus>
+  objectives: Record<string, boolean> // цели, отмеченные выполненными вручную
 }
 
 export interface Hotkeys {
@@ -121,6 +126,12 @@ export interface LiveState {
   dataStatus: string
 }
 
+/** Раздел «Выполнение» из русской вики: абзацы и пункты списка простым текстом. */
+export interface QuestGuide {
+  url: string
+  blocks: { kind: 'p' | 'li'; text: string }[]
+}
+
 export type OverlayMode = 'hidden' | 'minimap' | 'full'
 
 export interface Api {
@@ -131,6 +142,8 @@ export interface Api {
   getProgress(): Promise<Progress>
   setTaskStatus(taskId: string, status: TaskStatus | null): Promise<Progress>
   setPlayerLevel(level: number): Promise<Progress>
+  setObjectiveDone(objectiveId: string, done: boolean): Promise<Progress>
+  getGuide(taskName: string): Promise<QuestGuide | null>
   importFromLogs(): Promise<number>
   getLive(): Promise<LiveState>
   setCurrentMap(map: string | null): Promise<void>

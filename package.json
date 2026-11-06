@@ -10,19 +10,23 @@
     "build": "electron-vite build",
     "start": "electron-vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
-    "dist": "electron-vite build && electron-builder --win portable"
+    "dist": "electron-vite build && electron-builder --win portable",
+    "pack": "electron-vite build && electron-builder --dir"
   },
   "build": {
     "appId": "local.tarkovhelper",
     "productName": "TarkovHelper",
     "directories": {
-      "output": "dist"
+      "output": "dist",
+      "buildResources": "build"
     },
     "files": [
       "out/**/*"
     ],
+    "asar": false,
     "win": {
-      "target": "portable"
+      "target": "dir",
+      "icon": "build/icon.png"
     }
   },
   "dependencies": {
