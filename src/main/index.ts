@@ -8,7 +8,7 @@ import { fetchGameData, loadCached } from './tarkovData'
 import { LogWatcher } from './logWatcher'
 import { ScreenshotWatcher } from './screenshotWatcher'
 import { matchItems, scanPrice, warmUpOcr } from './priceScanner'
-import { getGuide } from './wikiGuide'
+import { getGuide } from './tarkovHelp'
 
 // ---------- состояние ----------
 
@@ -30,8 +30,8 @@ const defaultSettings = (): Settings => ({
   gamePath: detectGamePath(),
   screenshotsPath: join(app.getPath('documents'), 'Escape from Tarkov', 'Screenshots'),
   gameMode: 'auto',
-  hotkeys: { overlay: 'F8', minimap: 'F7', price: 'F9' },
-  minimapOpacity: 0.85
+  hotkeys: { overlay: 'F8', price: 'F9' },
+  deleteScreenshots: true
 })
 
 let settings: Settings
@@ -147,6 +147,7 @@ const logs = new LogWatcher(() => settings.gamePath, {
 
 const shots = new ScreenshotWatcher(
   () => settings.screenshotsPath,
+  () => settings.deleteScreenshots,
   (p) => {
     live.position = { ...p, map: live.currentMap, at: Date.now() }
     pushLive()
@@ -238,7 +239,6 @@ function registerHotkeys(): void {
     }
   }
   bind(settings.hotkeys.overlay, () => setOverlayMode(overlayMode === 'full' ? 'hidden' : 'full'))
-  bind(settings.hotkeys.minimap, () => setOverlayMode(overlayMode === 'minimap' ? 'hidden' : 'minimap'))
   bind(settings.hotkeys.price, () => checkPrice())
 }
 
@@ -254,6 +254,7 @@ function registerIpc(): void {
     writeJson('settings.json', settings)
     if (prev.gamePath !== settings.gamePath) logs.start()
     if (prev.screenshotsPath !== settings.screenshotsPath) shots.start()
+    else if (!prev.deleteScreenshots && settings.deleteScreenshots) shots.cleanup()
     if (prev.gameMode !== settings.gameMode) loadData()
     registerHotkeys()
     send('settings', settings)
@@ -313,7 +314,10 @@ if (!app.requestSingleInstanceLock()) app.quit()
 app.whenReady().then(() => {
   const defaults = defaultSettings()
   const saved = readJson<Partial<Settings>>('settings.json', {})
-  settings = { ...defaults, ...saved, hotkeys: { ...defaults.hotkeys, ...saved.hotkeys } }
+  // берём только известные поля — так из старых настроек пропадают удалённые функции (мини-карта)
+  const pick = <T extends object>(base: T, from: any): T =>
+    Object.fromEntries(Object.keys(base).map((k) => [k, from?.[k] ?? (base as any)[k]])) as T
+  settings = { ...pick(defaults, saved), hotkeys: pick(defaults.hotkeys, saved.hotkeys) }
   if (!existsSync(settings.gamePath)) live.logStatus = 'Папка игры не найдена — укажите её в настройках'
 
   registerIpc()

@@ -3,6 +3,7 @@ import type { TaskStatus } from '@shared/types'
 import type { AppState } from '../useAppState'
 import { QUEST_STATE_LABEL, questState, type QuestState } from '../questLogic'
 import { QuestDetails } from '../components/QuestDetails'
+import { QuestPage } from './QuestPage'
 
 type Filter = 'active' | 'available' | 'completed' | 'all'
 const FILTERS: [Filter, string][] = [
@@ -19,6 +20,7 @@ export function QuestsPage({ s }: { s: AppState }) {
   const [kappa, setKappa] = useState(false)
   const [query, setQuery] = useState('')
   const [open, setOpen] = useState<string | null>(null)
+  const [pageTaskId, setPageTaskId] = useState<string | null>(null)
   const [importMsg, setImportMsg] = useState('')
 
   const rows = useMemo(() => {
@@ -37,6 +39,9 @@ export function QuestsPage({ s }: { s: AppState }) {
   }, [data, progress, filter, mapFilter, kappa, query])
 
   if (!data) return <div className="empty">Квесты ещё не загружены. {live?.dataStatus}</div>
+
+  const pageTask = pageTaskId ? data.tasks.find((t) => t.id === pageTaskId) : null
+  if (pageTask) return <QuestPage task={pageTask} progress={progress} onBack={() => setPageTaskId(null)} />
 
   const counts = data.tasks.reduce<Record<QuestState, number>>(
     (acc, t) => ((acc[questState(t, progress)]++, acc)),
@@ -113,6 +118,9 @@ export function QuestsPage({ s }: { s: AppState }) {
             {open === t.id && (
               <div className="quest-body">
                 <QuestDetails task={t} progress={progress} />
+                <button className="btn btn-brass qd-open" onClick={() => setPageTaskId(t.id)}>
+                  Как выполнить (гайд со скриншотами)
+                </button>
               </div>
             )}
           </div>

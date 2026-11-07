@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { AppState } from '../useAppState'
 import { MapView, type MapMarker } from '../components/MapView'
-import { QuestDetails } from '../components/QuestDetails'
+import { QuestPage } from './QuestPage'
 import { buildMarkers, questsOnMap, type Faction } from '../mapMarkers'
 
-export function loadFaction(): Faction {
+function loadFaction(): Faction {
   try {
     return localStorage.getItem('faction') === 'scav' ? 'scav' : 'pmc'
   } catch {
@@ -17,7 +17,8 @@ export function MapPage({ s }: { s: AppState }) {
   const [selected, setSelected] = useState<string | null>(null)
   const [opts, setOpts] = useState({ quests: true, available: false, extracts: true })
   const [faction, setFaction] = useState<Faction>(loadFaction)
-  const [taskId, setTaskId] = useState<string | null>(null)
+  const [taskId, setTaskId] = useState<string | null>(null) // квест, подсвеченный на карте
+  const [pageTaskId, setPageTaskId] = useState<string | null>(null) // квест, открытый на отдельной странице
 
   // как только игра загрузила локацию — переключаемся на неё
   useEffect(() => {
@@ -55,6 +56,22 @@ export function MapPage({ s }: { s: AppState }) {
   const onMarkerClick = useCallback((mk: MapMarker) => mk.taskId && setTaskId(mk.taskId), [])
 
   if (!data || !map) return <div className="empty">Данные карт ещё не загружены. {live?.dataStatus}</div>
+
+  const pageTask = pageTaskId ? data.tasks.find((t) => t.id === pageTaskId) : null
+  if (pageTask) {
+    return (
+      <QuestPage
+        task={pageTask}
+        progress={progress}
+        map={map.normalizedName}
+        onBack={() => setPageTaskId(null)}
+        onShowOnMap={() => {
+          setTaskId(pageTask.id)
+          setPageTaskId(null)
+        }}
+      />
+    )
+  }
 
   const pos = live?.position && (live.position.map === map.normalizedName || !live.position.map) ? live.position : null
   const toggle = (k: keyof typeof opts) => setOpts((o) => ({ ...o, [k]: !o[k] }))
@@ -95,7 +112,10 @@ export function MapPage({ s }: { s: AppState }) {
               <button
                 key={t.id}
                 className={t.id === taskId ? 'mq active' : 'mq'}
-                onClick={() => setTaskId(t.id === taskId ? null : t.id)}
+                onClick={() => {
+                  setTaskId(t.id)
+                  setPageTaskId(t.id)
+                }}
               >
                 <span className="mq-name">{t.name}</span>
                 <span className="mq-meta">{n ? `${n} на карте` : 'без маркера'}</span>
@@ -134,11 +154,14 @@ export function MapPage({ s }: { s: AppState }) {
       <div className="map-wrap">
         <MapView map={map} markers={markers} position={pos} focus={focus} onMarkerClick={onMarkerClick} />
         {task && (
-          <div className="quest-drawer">
-            <button className="drawer-close" onClick={() => setTaskId(null)} title="Закрыть">
+          <div className="quest-chip">
+            <span className="quest-chip-name">{task.name}</span>
+            <button className="btn btn-brass" onClick={() => setPageTaskId(task.id)}>
+              Как выполнить
+            </button>
+            <button className="drawer-close" onClick={() => setTaskId(null)} title="Снять выделение">
               ×
             </button>
-            <QuestDetails task={task} progress={progress} map={map.normalizedName} />
           </div>
         )}
       </div>

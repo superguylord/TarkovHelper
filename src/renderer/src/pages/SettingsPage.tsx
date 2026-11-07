@@ -3,7 +3,6 @@ import type { AppState } from '../useAppState'
 
 const HOTKEY_LABELS: [keyof Hotkeys, string][] = [
   ['overlay', 'Оверлей (карта, квесты, цены)'],
-  ['minimap', 'Мини-карта поверх игры'],
   ['price', 'Цена предмета под курсором']
 ]
 
@@ -34,6 +33,14 @@ export function SettingsPage({ s }: { s: AppState }) {
             <button className="btn" onClick={() => pick('screenshotsPath')}>Выбрать…</button>
           </div>
         </label>
+        <label className="check">
+          <input
+            type="checkbox"
+            checked={settings.deleteScreenshots}
+            onChange={(e) => set({ deleteScreenshots: e.target.checked })}
+          />{' '}
+          Убирать скриншоты из игры в Корзину после того, как позиция прочитана
+        </label>
         <label className="field">
           <span>Режим игры (влияет на цены и квесты)</span>
           <select value={settings.gameMode} onChange={(e) => set({ gameMode: e.target.value as Settings['gameMode'] })}>
@@ -60,17 +67,6 @@ export function SettingsPage({ s }: { s: AppState }) {
             />
           </label>
         ))}
-        <label className="field inline">
-          <span>Прозрачность мини-карты</span>
-          <input
-            type="range"
-            min={0.3}
-            max={1}
-            step={0.05}
-            value={settings.minimapOpacity}
-            onChange={(e) => set({ minimapOpacity: Number(e.target.value) })}
-          />
-        </label>
       </section>
 
       <section className="panel">

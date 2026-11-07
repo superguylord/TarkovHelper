@@ -1,34 +1,9 @@
-import { useEffect, useState } from 'react'
-import type { Progress, QuestGuide, Task } from '@shared/types'
+import type { Progress, Task } from '@shared/types'
 import { QUEST_STATE_LABEL, questState } from '../questLogic'
 
-const guideCache = new Map<string, Promise<QuestGuide | null>>()
-
-function loadGuide(name: string): Promise<QuestGuide | null> {
-  let p = guideCache.get(name)
-  if (!p) {
-    p = window.api.getGuide(name)
-    guideCache.set(name, p)
-  }
-  return p
-}
-
-/** Карточка квеста: цели с отметками, подсказки, ключи и гайд из вики. */
+/** Карточка квеста: цели с отметками, подсказки и нужные ключи. */
 export function QuestDetails({ task, progress, map }: { task: Task; progress: Progress; map?: string }) {
   const st = questState(task, progress)
-  const [guide, setGuide] = useState<QuestGuide | null | 'loading'>('loading')
-  const [showGuide, setShowGuide] = useState(false)
-
-  useEffect(() => {
-    if (!showGuide) return
-    let alive = true
-    setGuide('loading')
-    loadGuide(task.name).then((g) => alive && setGuide(g))
-    return () => {
-      alive = false
-    }
-  }, [task.name, showGuide])
-
   // на карте сначала цели этой локации, потом остальные
   const objectives = [...task.objectives].sort((a, b) => {
     if (!map) return 0
@@ -79,43 +54,6 @@ export function QuestDetails({ task, progress, map }: { task: Task; progress: Pr
           )
         })}
       </ul>
-
-      <div className="qd-guide">
-        {!showGuide ? (
-          <button className="btn" onClick={() => setShowGuide(true)}>
-            Как выполнить (гайд из вики)
-          </button>
-        ) : guide === 'loading' ? (
-          <div className="muted small">Загружаю гайд…</div>
-        ) : guide && guide.blocks.length ? (
-          <>
-            <div className="eyebrow">Как выполнить</div>
-            <div className="guide-text">
-              {guide.blocks.map((b, i) =>
-                b.kind === 'li' ? (
-                  <div key={i} className="guide-li">
-                    • {b.text}
-                  </div>
-                ) : (
-                  <p key={i}>{b.text}</p>
-                )
-              )}
-            </div>
-            <a href={guide.url} target="_blank" rel="noreferrer" className="small">
-              Открыть страницу в вики
-            </a>
-          </>
-        ) : (
-          <div className="muted small">
-            Гайд в вики не найден.{' '}
-            {task.wikiLink && (
-              <a href={task.wikiLink} target="_blank" rel="noreferrer">
-                Английская вики
-              </a>
-            )}
-          </div>
-        )}
-      </div>
     </div>
   )
 }

@@ -1,5 +1,6 @@
-import { existsSync, watch, type FSWatcher } from 'node:fs'
-import { basename } from 'node:path'
+import { shell } from 'electron'
+import { existsSync, readdirSync, watch, type FSWatcher } from 'node:fs'
+import { basename, join } from 'node:path'
 import type { PlayerPosition } from '@shared/types'
 
 // Игра пишет в имя скриншота позицию и поворот камеры:
@@ -11,9 +12,25 @@ export function parseScreenshotName(name: string): Omit<PlayerPosition, 'map' | 
   const m = NAME_RE.exec(name)
   if (!m) return null
   const [x, y, z, qx, qy, qz, qw] = m.slice(1).map(Number)
-  // поворот вокруг вертикальной оси (Unity: Y вверх), 0° смотрит вдоль +z
+  // направление взгляда — проекция «вперёд» камеры на землю (Unity: Y вверх),
+  // поэтому не зависит от того, смотрит игрок вверх или вниз; 0° — вдоль +z
   const yaw = (Math.atan2(2 * (qw * qy + qx * qz), 1 - 2 * (qx * qx + qy * qy)) * 180) / Math.PI
   return { x, y, z, yaw }
+}
+
+/**
+ * Отправляет скриншот в Корзину (его можно восстановить). Игра может ещё дописывать файл,
+ * поэтому пробуем несколько раз с паузой.
+ */
+async function removeLater(path: string, attempt = 0): Promise<void> {
+  await new Promise((r) => setTimeout(r, 2000 * (attempt + 1)))
+  if (!existsSync(path)) return
+  try {
+    await shell.trashItem(path)
+  } catch (e: any) {
+    if (attempt < 4) return removeLater(path, attempt + 1)
+    console.warn('Не удалось убрать скриншот', path, e?.message)
+  }
 }
 
 export class ScreenshotWatcher {
@@ -23,6 +40,7 @@ export class ScreenshotWatcher {
 
   constructor(
     private dir: () => string,
+    private autoDelete: () => boolean,
     private onPosition: (p: Omit<PlayerPosition, 'map' | 'at'>) => void
   ) {}
 
@@ -34,15 +52,26 @@ export class ScreenshotWatcher {
       this.retry = setTimeout(() => this.start(), 5000)
       return
     }
+    this.cleanup(dir)
     this.watcher = watch(dir, (_event, file) => {
       if (!file || !file.toString().endsWith('.png')) return
       const name = basename(file.toString())
       if (this.seen.has(name)) return
       this.seen.add(name)
       const pos = parseScreenshotName(name)
-      if (pos) this.onPosition(pos)
+      if (!pos) return
+      this.onPosition(pos)
+      if (this.autoDelete()) removeLater(join(dir, name))
     })
     this.watcher.on('error', () => this.start())
+  }
+
+  /** Убирает скриншоты, оставшиеся с прошлых запусков (только игровые — с координатами в имени). */
+  cleanup(dir = this.dir()): void {
+    if (!this.autoDelete() || !existsSync(dir)) return
+    for (const f of readdirSync(dir)) {
+      if (f.endsWith('.png') && NAME_RE.test(f)) removeLater(join(dir, f))
+    }
   }
 
   stop(): void {

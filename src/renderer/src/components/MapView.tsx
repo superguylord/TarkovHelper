@@ -48,14 +48,13 @@ interface Props {
   map: MapInfo
   markers: MapMarker[]
   position: PlayerPosition | null
-  compact?: boolean // мини-карта: без управления, центр на игроке
   focus?: Point3[] | null // показать эти точки целиком (например, выбранный квест)
   onMarkerClick?: (marker: MapMarker) => void
 }
 
 const svgCache = new Map<string, Promise<string>>()
 
-export function MapView({ map, markers, position, compact, focus, onMarkerClick }: Props) {
+export function MapView({ map, markers, position, focus, onMarkerClick }: Props) {
   const el = useRef<HTMLDivElement>(null)
   const lmap = useRef<L.Map | null>(null)
   const markerLayer = useRef<L.LayerGroup | null>(null)
@@ -66,8 +65,6 @@ export function MapView({ map, markers, position, compact, focus, onMarkerClick 
     if (!el.current) return
     const m = L.map(el.current, {
       crs: makeCrs(map),
-      zoomControl: !compact,
-      attributionControl: !compact,
       zoomSnap: 0.25,
       minZoom: (map.minZoom ?? 1) - 2,
       maxZoom: (map.maxZoom ?? 6) + 2
@@ -114,7 +111,7 @@ export function MapView({ map, markers, position, compact, focus, onMarkerClick 
       m.remove()
       lmap.current = null
     }
-  }, [map, compact])
+  }, [map])
 
   // маркеры квестов и выходов
   useEffect(() => {
@@ -142,12 +139,12 @@ export function MapView({ map, markers, position, compact, focus, onMarkerClick 
       marker.bindTooltip(tip, {
         className: `mk-tip${isQuest(mk.kind) ? '' : ' mk-tip-exit'}`,
         direction: 'top',
-        permanent: !isQuest(mk.kind) && !compact
+        permanent: !isQuest(mk.kind)
       })
       if (onMarkerClick) marker.on('click', () => onMarkerClick(mk))
       layer.addLayer(marker)
     }
-  }, [markers, map, compact, onMarkerClick])
+  }, [markers, map, onMarkerClick])
 
   // приблизить к выбранным точкам
   useEffect(() => {
@@ -179,11 +176,10 @@ export function MapView({ map, markers, position, compact, focus, onMarkerClick 
       iconAnchor: [48, 48]
     })
     layer.addLayer(L.marker(here, { icon, interactive: false }))
-    if (compact) m.setView(here, Math.max(m.getZoom(), (map.maxZoom ?? 6) - 2))
-    else m.panTo(here)
-  }, [position, map, compact])
+    m.panTo(here)
+  }, [position, map])
 
-  return <div ref={el} className={compact ? 'map map-compact' : 'map'} />
+  return <div ref={el} className="map" />
 }
 
 const CONE_SVG = `<svg viewBox="0 0 96 96" width="96" height="96">

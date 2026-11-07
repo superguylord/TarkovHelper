@@ -92,7 +92,6 @@ export interface Progress {
 
 export interface Hotkeys {
   overlay: string // показать/скрыть оверлей
-  minimap: string // мини-карта поверх игры
   price: string // цена предмета под курсором
 }
 
@@ -101,7 +100,7 @@ export interface Settings {
   screenshotsPath: string
   gameMode: 'auto' | GameMode
   hotkeys: Hotkeys
-  minimapOpacity: number
+  deleteScreenshots: boolean // удалять скриншоты после чтения позиции
 }
 
 export interface PlayerPosition extends Point3 {
@@ -126,13 +125,13 @@ export interface LiveState {
   dataStatus: string
 }
 
-/** Раздел «Выполнение» из русской вики: абзацы и пункты списка простым текстом. */
+/** Гайд по квесту с tarkov.help: HTML страницы прохождения (текст и скриншоты мест). */
 export interface QuestGuide {
   url: string
-  blocks: { kind: 'p' | 'li'; text: string }[]
+  html: string
 }
 
-export type OverlayMode = 'hidden' | 'minimap' | 'full'
+export type OverlayMode = 'hidden' | 'full'
 
 export interface Api {
   getData(): Promise<GameData | null>

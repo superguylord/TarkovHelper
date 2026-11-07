@@ -1,17 +1,14 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useAppState } from './useAppState'
 import { Logo, StatusChips, TABS, TabContent, type Tab } from './MainApp'
-import { MapView } from './components/MapView'
 import { PriceCard } from './components/PriceCard'
-import { buildMarkers } from './mapMarkers'
-import { loadFaction } from './pages/MapPage'
 
 const PRICE_TOAST_MS = 8000
 
-/** Прозрачное окно поверх игры: всплывающая цена, мини-карта и полный режим. */
+/** Прозрачное окно поверх игры: всплывающая цена и полный режим. */
 export function OverlayApp() {
   const s = useAppState()
-  const { overlayMode, price, data, live, progress, settings } = s
+  const { overlayMode, price, data } = s
   const [tab, setTab] = useState<Tab>('map')
   const [now, setNow] = useState(Date.now())
 
@@ -30,31 +27,10 @@ export function OverlayApp() {
     return () => window.removeEventListener('keydown', onKey)
   }, [overlayMode])
 
-  const map = data?.maps.find((m) => m.normalizedName === live?.currentMap)
-  const markers = useMemo(
-    () => (data && map ? buildMarkers(data, map, progress, {
-            quests: true,
-            available: false,
-            extracts: true,
-            faction: loadFaction(),
-            selectedTask: null
-          }) : []),
-    [data, map, progress]
-  )
   const showPrice = price && now - price.at < PRICE_TOAST_MS && overlayMode !== 'full'
 
   return (
     <>
-      {overlayMode === 'minimap' && (
-        <div className="minimap" style={{ opacity: settings?.minimapOpacity ?? 0.85 }}>
-          {map ? (
-            <MapView map={map} markers={markers} position={live?.position ?? null} compact />
-          ) : (
-            <div className="empty">Карта определится при загрузке в рейд</div>
-          )}
-        </div>
-      )}
-
       {showPrice && (
         <div className="price-toast">
           {price.item && data ? (
