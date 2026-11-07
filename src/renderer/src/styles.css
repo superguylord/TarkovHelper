@@ -205,12 +205,8 @@ input:focus, select:focus { border-color: var(--brass); }
 .leaflet-control-attribution { background: rgba(10, 15, 12, 0.7) !important; color: var(--text-dim) !important; }
 .leaflet-control-attribution a { color: var(--text-muted) !important; }
 
-.mk { stroke-width: 2; fill-opacity: 0.85; }
-.mk-quest { stroke: #fff3d0; fill: var(--brass); }
-.mk-quest-selected { stroke: #ffffff; fill: #ff9d3c; stroke-width: 3; }
-.mk-extract { stroke: #d8f0dc; fill: #3f9a52; }
-.mk-extract-shared { stroke: #d6e8ee; fill: var(--blue); }
-.mk-transit { stroke: #eadcff; fill: #8a6fc0; }
+.map-icon { background: none; border: none; }
+.map-icon svg { display: block; filter: drop-shadow(0 2px 3px rgba(0, 0, 0, 0.6)); cursor: pointer; }
 .zone { stroke-width: 1.5; fill-opacity: 0.12; }
 .zone-quest { stroke: var(--brass); fill: var(--brass); }
 .zone-quest-selected { stroke: #ff9d3c; fill: #ff9d3c; fill-opacity: 0.22; stroke-width: 2.5; }
@@ -225,7 +221,7 @@ input:focus, select:focus { border-color: var(--brass); }
   font-size: 12px;
 }
 .leaflet-tooltip.mk-tip::before { display: none; }
-.leaflet-tooltip.mk-tip-exit { border-color: #3f9a52; padding: 2px 7px; white-space: nowrap; max-width: none; }
+.leaflet-tooltip.mk-tip-exit { border-color: #3f9a52; font-size: 11.5px; padding: 2px 7px; white-space: nowrap; max-width: none; }
 .mk-tip-exit small { color: var(--brass-strong); }
 
 .player-icon { background: none; border: none; }
@@ -441,31 +437,12 @@ input:focus, select:focus { border-color: var(--brass); }
 .plan-map { font-family: var(--font-display); font-weight: 700; font-size: 44px; letter-spacing: 2px; line-height: 1.05; }
 .plan-actions { display: flex; gap: 8px; }
 .btn:disabled { opacity: 0.45; cursor: default; }
-.plan-body { display: grid; grid-template-columns: 1.3fr 1fr; gap: 24px; margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--line); }
-.route { list-style: none; margin: 0 0 14px; padding: 0; display: flex; flex-direction: column; gap: 6px; }
-.route li { display: grid; grid-template-columns: 30px 1fr auto; gap: 10px; align-items: center; padding: 8px 10px; background: var(--panel-2); border: 1px solid var(--line); border-radius: var(--radius-sm); }
-.route-n { width: 26px; height: 26px; display: grid; place-items: center; border-radius: 50%; background: var(--brass); color: var(--bg); font-weight: 700; font-size: 13px; }
-.route-exit .route-n { background: #3f9a52; color: #fff; }
-.route-task { font-weight: 600; font-size: 13px; }
-.route-obj { font-size: 12.5px; color: var(--text-muted); }
-.route-d { font-size: 12px; color: var(--text-dim); white-space: nowrap; }
-.along { margin: 0 0 8px; padding-left: 18px; font-size: 13px; color: var(--text-muted); }
-.along li { margin: 3px 0; }
-.bring { display: flex; flex-direction: column; gap: 6px; margin-bottom: 10px; }
+.plan-body { margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--line); }
+.bring { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 6px; margin-bottom: 10px; }
 .bring-item { padding: 8px 10px; background: var(--panel-2); border: 1px solid var(--line); border-radius: var(--radius-sm); }
 .bring-name { font-weight: 600; font-size: 13px; }
 .bring-count { color: var(--brass-strong); }
 .bring-meta { font-size: 12px; color: var(--text-muted); }
-
-/* маршрут на карте */
-.route-line { stroke: #ff9d3c; stroke-width: 3; stroke-dasharray: 8 6; fill: none; }
-.route-icon { background: none; border: none; }
-.route-num {
-  width: 26px; height: 26px; display: grid; place-items: center;
-  border-radius: 50%; border: 2px solid #fff;
-  background: #ff9d3c; color: #10170f; font-weight: 700; font-size: 13px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.6);
-}
 
 /* ---------- торговцы ---------- */
 .traders { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 12px; }

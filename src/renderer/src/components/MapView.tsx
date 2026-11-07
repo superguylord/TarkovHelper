@@ -40,9 +40,37 @@ export interface MapMarker {
   outline?: { x: number; z: number }[] // контур зоны квеста
   label: string
   detail?: string
-  kind: 'quest' | 'quest-selected' | 'extract' | 'extract-shared' | 'transit' | 'route'
+  kind: 'quest' | 'quest-selected' | 'extract' | 'extract-shared' | 'transit'
   taskId?: string
-  num?: number // номер точки маршрута рейда
+}
+
+// ---------- иконки маркеров ----------
+
+const PIN = (fill: string, w: number, h: number) =>
+  `<svg viewBox="0 0 28 36" width="${w}" height="${h}"><path d="M14 1.5C7.1 1.5 1.8 6.8 1.8 13.4 1.8 22.6 14 34.5 14 34.5s12.2-11.9 12.2-21.1C26.2 6.8 20.9 1.5 14 1.5z" fill="${fill}" stroke="#0a0f0c" stroke-width="2"/><circle cx="14" cy="13.2" r="4.6" fill="#0a0f0c"/></svg>`
+
+// дверь со стрелкой наружу — знак эвакуации
+const EXIT = (fill: string) =>
+  `<svg viewBox="0 0 26 26" width="26" height="26"><rect x="1" y="1" width="24" height="24" rx="6" fill="${fill}" stroke="#0a0f0c" stroke-width="1.5"/><path d="M7.5 5.5h7v15h-7z" fill="none" stroke="#fff" stroke-width="1.8" stroke-linejoin="round"/><path d="M12 13h8.5M17.5 10l3 3-3 3" fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>`
+
+const icon = (html: string, size: [number, number], anchor: [number, number]) =>
+  L.divIcon({ className: 'map-icon', html, iconSize: size, iconAnchor: anchor })
+
+const ICONS: Record<MapMarker['kind'], L.DivIcon> = {
+  quest: icon(PIN('#c4a665', 28, 36), [28, 36], [14, 35]),
+  'quest-selected': icon(PIN('#ff9d3c', 36, 46), [36, 46], [18, 45]),
+  extract: icon(EXIT('#3f9a52'), [26, 26], [13, 13]),
+  'extract-shared': icon(EXIT('#5f8fa3'), [26, 26], [13, 13]),
+  transit: icon(EXIT('#8a6fc0'), [26, 26], [13, 13])
+}
+
+// подпись появляется над иконкой: у пина точка внизу, у выхода — в центре
+const TIP_OFFSET: Record<MapMarker['kind'], [number, number]> = {
+  quest: [0, -34],
+  'quest-selected': [0, -44],
+  extract: [0, -12],
+  'extract-shared': [0, -12],
+  transit: [0, -12]
 }
 
 interface Props {
@@ -50,13 +78,12 @@ interface Props {
   markers: MapMarker[]
   position: PlayerPosition | null
   focus?: Point3[] | null // показать эти точки целиком (например, выбранный квест)
-  path?: Point3[] | null // линия маршрута рейда
   onMarkerClick?: (marker: MapMarker) => void
 }
 
 const svgCache = new Map<string, Promise<string>>()
 
-export function MapView({ map, markers, position, focus, path, onMarkerClick }: Props) {
+export function MapView({ map, markers, position, focus, onMarkerClick }: Props) {
   const el = useRef<HTMLDivElement>(null)
   const lmap = useRef<L.Map | null>(null)
   const markerLayer = useRef<L.LayerGroup | null>(null)
@@ -120,26 +147,11 @@ export function MapView({ map, markers, position, focus, path, onMarkerClick }: 
     const layer = markerLayer.current
     if (!layer) return
     layer.clearLayers()
-    const isQuest = (k: MapMarker['kind']) => k === 'quest' || k === 'quest-selected' || k === 'route'
-    if (path && path.length > 1) {
-      layer.addLayer(L.polyline(path.map(toLatLng), { className: 'route-line', interactive: false }))
-    }
-    // выбранный квест и маршрут рисуем последними, чтобы они были поверх остальных
-    const weight = (k: MapMarker['kind']) => (k === 'route' ? 2 : k === 'quest-selected' ? 1 : 0)
+    const isQuest = (k: MapMarker['kind']) => k === 'quest' || k === 'quest-selected'
+    // выходы под квестами, выбранный квест — поверх всех
+    const weight = (k: MapMarker['kind']) => (k === 'quest-selected' ? 2 : isQuest(k) ? 1 : 0)
     const sorted = [...markers].sort((a, b) => weight(a.kind) - weight(b.kind))
     for (const mk of sorted) {
-      if (mk.num != null) {
-        const numbered = L.marker(toLatLng(mk.point), {
-          icon: L.divIcon({ className: 'route-icon', html: `<div class="route-num">${mk.num}</div>`, iconSize: [26, 26], iconAnchor: [13, 13] })
-        })
-        numbered.bindTooltip(`<b>${escapeHtml(mk.label)}</b>${mk.detail ? `<br>${escapeHtml(mk.detail)}` : ''}`, {
-          className: 'mk-tip',
-          direction: 'top',
-          offset: [0, -10]
-        })
-        layer.addLayer(numbered)
-        continue
-      }
       if (mk.outline) {
         layer.addLayer(
           L.polygon(
@@ -148,21 +160,22 @@ export function MapView({ map, markers, position, focus, path, onMarkerClick }: 
           )
         )
       }
-      const marker = L.circleMarker(toLatLng(mk.point), {
-        radius: mk.kind === 'quest-selected' ? 9 : isQuest(mk.kind) ? 7 : 6,
-        className: `mk mk-${mk.kind}`
+      const marker = L.marker(toLatLng(mk.point), {
+        icon: ICONS[mk.kind],
+        zIndexOffset: weight(mk.kind) * 1000,
+        riseOnHover: true
       })
       const detail = mk.detail ? (isQuest(mk.kind) ? `<br>${escapeHtml(mk.detail)}` : `<br><small>${escapeHtml(mk.detail)}</small>`) : ''
-      const tip = `<b>${escapeHtml(mk.label)}</b>${detail}`
-      marker.bindTooltip(tip, {
+      marker.bindTooltip(`<b>${escapeHtml(mk.label)}</b>${detail}`, {
         className: `mk-tip${isQuest(mk.kind) ? '' : ' mk-tip-exit'}`,
         direction: 'top',
+        offset: TIP_OFFSET[mk.kind],
         permanent: !isQuest(mk.kind)
       })
       if (onMarkerClick) marker.on('click', () => onMarkerClick(mk))
       layer.addLayer(marker)
     }
-  }, [markers, map, path, onMarkerClick])
+  }, [markers, map, onMarkerClick])
 
   // приблизить к выбранным точкам
   useEffect(() => {

@@ -3,7 +3,6 @@ import type { GoonsState } from '@shared/types'
 import type { AppState } from '../useAppState'
 import type { Nav } from '../MainApp'
 import { questState } from '../questLogic'
-import { loadFaction } from '../mapMarkers'
 import { buildPlan, mapPriority } from '../raidPlan'
 
 const KIND_LABEL = { key: 'Ключ', mark: 'Пометить', plant: 'Заложить', questItem: 'Квестовый предмет', use: 'Использовать' }
@@ -15,8 +14,6 @@ export function timeAgo(at: number, now = Date.now()): string {
   const h = Math.floor(min / 60)
   return `${h} ч ${min % 60} мин назад`
 }
-
-const meters = (m: number) => `~${Math.round(m / 10) * 10} м`
 
 function GoonsCard({ goons }: { goons: GoonsState | null }) {
   // перерисовываем раз в минуту, чтобы «N мин назад» не застывало
@@ -76,10 +73,7 @@ export function BriefingPage({ s, nav }: { s: AppState; nav: Nav }) {
   const questsHere = priority.find((p) => p.map.normalizedName === map.normalizedName)?.quests ?? 0
   const today = new Date().toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' })
 
-  const makePlan = () => {
-    const player = live?.position && live.position.map === map.normalizedName ? live.position : null
-    nav.setPlan(buildPlan(data, map, progress, loadFaction(), player))
-  }
+  const makePlan = () => nav.setPlan(buildPlan(data, map, progress))
   const shownPlan = nav.plan && nav.plan.map === map.normalizedName ? nav.plan : null
 
   return (
@@ -150,11 +144,11 @@ export function BriefingPage({ s, nav }: { s: AppState; nav: Nav }) {
           </div>
           <div className="plan-actions">
             <button className="btn btn-brass" onClick={makePlan} disabled={!questsHere}>
-              {shownPlan ? 'Пересчитать план' : 'Создать план'}
+              {shownPlan ? 'Обновить план' : 'Создать план'}
             </button>
-            {shownPlan && shownPlan.stops.length > 0 && (
-              <button className="btn" onClick={() => nav.go('map')}>
-                Маршрут на карте
+            {shownPlan && (
+              <button className="btn" onClick={() => nav.openMap(map.normalizedName)}>
+                Квесты на карте
               </button>
             )}
           </div>
@@ -162,75 +156,28 @@ export function BriefingPage({ s, nav }: { s: AppState; nav: Nav }) {
 
         {shownPlan && (
           <div className="plan-body">
-            <div>
-              <div className="row-title">
-                Маршрут · {meters(shownPlan.total)}
-                {shownPlan.startFromPlayer ? ' от вашей позиции' : ''}
-              </div>
-              {shownPlan.stops.length === 0 && <p className="muted small">Точек на карте нет — только попутные цели.</p>}
-              <ol className="route">
-                {shownPlan.stops.map((st, i) => (
-                  <li key={st.objective.id + i}>
-                    <span className="route-n">{i + 1}</span>
-                    <div>
-                      <div className="route-task">{st.taskName}</div>
-                      <div className="route-obj">
-                        {st.objective.description}
-                        {st.objective.optional && <span className="muted"> (необязательно)</span>}
-                      </div>
+            <div className="row-title">Взять с собой · {shownPlan.bring.length}</div>
+            {shownPlan.bring.length === 0 ? (
+              <p className="muted small">Для этих заданий ничего особенного брать не нужно.</p>
+            ) : (
+              <div className="bring">
+                {shownPlan.bring.map((b) => (
+                  <div key={b.kind + b.name} className="bring-item">
+                    <div className="bring-name">
+                      {b.name}
+                      {b.count > 1 && <span className="bring-count"> ×{b.count}</span>}
                     </div>
-                    <span className="route-d">{i === 0 && !shownPlan.startFromPlayer ? 'старт' : meters(st.distance)}</span>
-                  </li>
+                    <div className="bring-meta">
+                      {KIND_LABEL[b.kind]} · {b.purposes.join(', ')}
+                    </div>
+                  </div>
                 ))}
-                {shownPlan.extract && (
-                  <li className="route-exit">
-                    <span className="route-n">⇥</span>
-                    <div>
-                      <div className="route-task">Выход: {shownPlan.extract.name}</div>
-                      {shownPlan.extract.note && <div className="route-obj">{shownPlan.extract.note}</div>}
-                    </div>
-                    <span className="route-d">{meters(shownPlan.extract.distance)}</span>
-                  </li>
-                )}
-              </ol>
-              {shownPlan.alongTheWay.length > 0 && (
-                <>
-                  <div className="row-title">Попутно (без точки на карте)</div>
-                  <ul className="along">
-                    {shownPlan.alongTheWay.map((a, i) => (
-                      <li key={i}>
-                        <b>{a.taskName}:</b> {a.description}
-                      </li>
-                    ))}
-                  </ul>
-                </>
-              )}
-            </div>
-
-            <div>
-              <div className="row-title">Взять с собой · {shownPlan.bring.length}</div>
-              {shownPlan.bring.length === 0 ? (
-                <p className="muted small">Для этих заданий ничего особенного брать не нужно.</p>
-              ) : (
-                <div className="bring">
-                  {shownPlan.bring.map((b) => (
-                    <div key={b.kind + b.name} className="bring-item">
-                      <div className="bring-name">
-                        {b.name}
-                        {b.count > 1 && <span className="bring-count"> ×{b.count}</span>}
-                      </div>
-                      <div className="bring-meta">
-                        {KIND_LABEL[b.kind]} · {b.purposes.join(', ')}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-              <p className="muted small">
-                Только то, что нужно для заданий: ключи, закладки, маркеры и используемые предметы. Предметы «найти и
-                вынести» сюда не входят.
-              </p>
-            </div>
+              </div>
+            )}
+            <p className="muted small">
+              Только то, что нужно для заданий: ключи, закладки, маркеры и используемые предметы. Предметы «найти и
+              вынести» сюда не входят. Квесты: {shownPlan.quests.join(', ')}.
+            </p>
           </div>
         )}
       </section>

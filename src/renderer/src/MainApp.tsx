@@ -10,11 +10,13 @@ import { SettingsPage } from './pages/SettingsPage'
 
 export type Tab = 'briefing' | 'quests' | 'map' | 'prices' | 'traders' | 'settings'
 
-/** Переходы между разделами и план рейда (его маршрут показывается на карте). */
+/** Переходы между разделами и план рейда (живёт, пока открыто окно). */
 export interface Nav {
   go(tab: Tab): void
   plan: RaidPlan | null
   setPlan(plan: RaidPlan | null): void
+  mapRequest: { map: string; at: number } | null // какую локацию открыть на карте
+  openMap(map: string): void
 }
 
 // иконки — простые контуры, чтобы меню читалось без картинок
@@ -90,7 +92,17 @@ function Status({ s }: { s: AppState }) {
 export function Shell({ s, overlay }: { s: AppState; overlay?: boolean }) {
   const [tab, setTab] = useState<Tab>('briefing')
   const [plan, setPlan] = useState<RaidPlan | null>(null)
-  const nav: Nav = { go: setTab, plan, setPlan }
+  const [mapRequest, setMapRequest] = useState<Nav['mapRequest']>(null)
+  const nav: Nav = {
+    go: setTab,
+    plan,
+    setPlan,
+    mapRequest,
+    openMap(map) {
+      setMapRequest({ map, at: Date.now() })
+      setTab('map')
+    }
+  }
 
   return (
     <div className="shell">
