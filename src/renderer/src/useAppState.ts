@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import type { GameData, LiveState, OverlayMode, PriceResult, Progress, Settings } from '@shared/types'
+import type { GameData, GoonsState, LiveState, OverlayMode, PriceResult, Progress, Settings } from '@shared/types'
 
 export interface AppState {
   data: GameData | null
@@ -8,6 +8,7 @@ export interface AppState {
   settings: Settings | null
   price: PriceResult | null
   overlayMode: OverlayMode
+  goons: GoonsState | null
 }
 
 /** Состояние приложения из main-процесса с подпиской на обновления. */
@@ -18,14 +19,15 @@ export function useAppState(): AppState {
     progress: { playerLevel: 1, tasks: {}, objectives: {} },
     settings: null,
     price: null,
-    overlayMode: 'hidden'
+    overlayMode: 'hidden',
+    goons: null
   })
 
   useEffect(() => {
     const api = window.api
     const set = (patch: Partial<AppState>) => setS((prev) => ({ ...prev, ...patch }))
-    Promise.all([api.getData(), api.getLive(), api.getProgress(), api.getSettings()]).then(
-      ([data, live, progress, settings]) => set({ data, live, progress, settings })
+    Promise.all([api.getData(), api.getLive(), api.getProgress(), api.getSettings(), api.getGoons()]).then(
+      ([data, live, progress, settings, goons]) => set({ data, live, progress, settings, goons })
     )
     const offs = [
       api.on('data', (data) => set({ data })),
@@ -33,7 +35,8 @@ export function useAppState(): AppState {
       api.on('progress', (progress) => set({ progress })),
       api.on('settings', (settings) => set({ settings })),
       api.on('price', (price) => set({ price })),
-      api.on('overlay-mode', (overlayMode) => set({ overlayMode }))
+      api.on('overlay-mode', (overlayMode) => set({ overlayMode })),
+      api.on('goons', (goons) => set({ goons }))
     ]
     return () => offs.forEach((off) => off())
   }, [])

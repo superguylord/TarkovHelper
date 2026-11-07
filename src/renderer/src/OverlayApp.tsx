@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useAppState } from './useAppState'
-import { Logo, StatusChips, TABS, TabContent, type Tab } from './MainApp'
+import { Shell } from './MainApp'
 import { PriceCard } from './components/PriceCard'
 
 const PRICE_TOAST_MS = 8000
@@ -9,7 +9,6 @@ const PRICE_TOAST_MS = 8000
 export function OverlayApp() {
   const s = useAppState()
   const { overlayMode, price, data } = s
-  const [tab, setTab] = useState<Tab>('map')
   const [now, setNow] = useState(Date.now())
 
   // скрываем карточку цены через несколько секунд
@@ -41,29 +40,12 @@ export function OverlayApp() {
         </div>
       )}
 
-      {overlayMode === 'full' && (
-        <div className="overlay-full">
-          <div className="overlay-panel">
-            <header className="header">
-              <Logo />
-              <nav className="nav">
-                {TABS.map(([t, label]) => (
-                  <button key={t} className={tab === t ? 'active' : ''} onClick={() => setTab(t)}>
-                    {label}
-                  </button>
-                ))}
-              </nav>
-              <StatusChips s={s} />
-              <button className="btn" onClick={() => window.api.setOverlayMode('hidden')}>
-                Закрыть <kbd>Esc</kbd>
-              </button>
-            </header>
-            <main className="content">
-              <TabContent tab={tab} s={s} />
-            </main>
-          </div>
+      {/* оверлей не размонтируем, чтобы при повторном открытии остались раздел и план рейда */}
+      <div className="overlay-full" style={{ display: overlayMode === 'full' ? undefined : 'none' }}>
+        <div className="overlay-panel">
+          <Shell s={s} overlay />
         </div>
-      )}
+      </div>
     </>
   )
 }

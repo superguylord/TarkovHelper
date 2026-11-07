@@ -22,7 +22,7 @@ export function QuestDetails({ task, progress, map }: { task: Task; progress: Pr
 
       {task.neededKeys.length > 0 && (
         <div className="qd-keys">
-          <span className="tag tag-brass">Ключи</span> {[...new Set(task.neededKeys)].join(', ')}
+          <span className="tag tag-brass">Ключи</span> {[...new Set(task.neededKeys.flatMap((k) => k.keys))].join(', ')}
         </div>
       )}
 

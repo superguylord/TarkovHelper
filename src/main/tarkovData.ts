@@ -1,4 +1,4 @@
-import type { Extract, GameData, GameMode, Item, MapInfo, MapPoint, Task } from '@shared/types'
+import type { BringItem, Extract, GameData, GameMode, Item, MapInfo, MapPoint, Task, TraderInfo } from '@shared/types'
 import { readJson, writeJson } from './store'
 
 // Данные берём с tarkov.dev: статические выгрузки json.tarkov.dev (их же использует сайт;
@@ -164,6 +164,20 @@ function objectiveHints(o: any, ru: Dict, name: (id: string) => string): string[
   return h
 }
 
+/** Что нужно иметь при себе в рейде для цели: ключи, закладки, маркеры, используемые предметы. */
+function objectiveBring(o: any, name: (id: string) => string): BringItem[] {
+  const out: BringItem[] = []
+  const alts = (ids: string[] | undefined) => (ids ?? []).map(name).join(' или ')
+  for (const keys of (o.requiredKeys ?? []) as string[][]) {
+    if (keys.length) out.push({ name: alts(keys), count: 1, kind: 'key' })
+  }
+  if (o.type === 'plantItem' && o.items?.length) out.push({ name: alts(o.items), count: o.count || 1, kind: 'plant' })
+  if (o.type === 'mark' && o.markerItem) out.push({ name: name(o.markerItem), count: 1, kind: 'mark' })
+  if (o.type === 'useItem' && o.useAny?.length) out.push({ name: alts(o.useAny), count: o.count || 1, kind: 'use' })
+  if (o.type === 'plantQuestItem' && o.questItem) out.push({ name: name(o.questItem), count: 1, kind: 'questItem' })
+  return out
+}
+
 function toTask(t: any, ru: Dict, traders: Dict, mapName: Dict, name: (id: string) => string): Task {
   return {
     id: t.id,
@@ -174,7 +188,7 @@ function toTask(t: any, ru: Dict, traders: Dict, mapName: Dict, name: (id: strin
     kappaRequired: !!t.kappaRequired,
     wikiLink: t.wikiLink ?? '',
     requires: (t.taskRequirements ?? []).map((r: any) => ({ taskId: r.task, status: r.status ?? [] })),
-    neededKeys: (t.neededKeys ?? []).flatMap((k: any) => (k.keys ?? []).map(name)),
+    neededKeys: (t.neededKeys ?? []).map((k: any) => ({ map: mapName[k.map] ?? null, keys: (k.keys ?? []).map(name) })),
     objectives: (t.objectives ?? []).map((o: any) => {
       const points: MapPoint[] = []
       for (const z of o.zones ?? []) {
@@ -193,7 +207,8 @@ function toTask(t: any, ru: Dict, traders: Dict, mapName: Dict, name: (id: strin
         optional: !!o.optional,
         maps: (o.maps ?? []).map((id: string) => mapName[id]).filter(Boolean),
         points,
-        hints: objectiveHints(o, ru, name)
+        hints: objectiveHints(o, ru, name),
+        bring: objectiveBring(o, name)
       }
     })
   }
@@ -234,7 +249,7 @@ function itemsUsedInTasks(tasks: any[]): Map<string, string[]> {
 }
 
 // версия в имени: при смене формата данных старый кэш просто не читается
-const cacheName = (mode: GameMode) => `gamedata-v2-${mode}.json`
+const cacheName = (mode: GameMode) => `gamedata-v3-${mode}.json`
 
 export function loadCached(mode: GameMode): GameData | null {
   const d = readJson<GameData | null>(cacheName(mode), null)
@@ -261,8 +276,12 @@ export async function fetchGameData(
 
   const same = prev?.gameMode === mode ? prev : null
   const traderNames: Dict = {}
+  const traderList: TraderInfo[] = []
   if (traders.status === 'fulfilled') {
-    for (const t of Object.values<any>(traders.value.data)) traderNames[t.id] = tr(traders.value.ru, t.name)
+    for (const t of Object.values<any>(traders.value.data)) {
+      traderNames[t.id] = tr(traders.value.ru, t.name)
+      traderList.push({ id: t.id, name: traderNames[t.id], normalizedName: t.normalizedName, resetTime: t.resetTime ?? null })
+    }
   }
   const tasksV = tasks.status === 'fulfilled' ? tasks.value : null
   const itemsV = items.status === 'fulfilled' ? items.value : null
@@ -285,6 +304,7 @@ export async function fetchGameData(
   const data: GameData = {
     fetchedAt: 0,
     gameMode: mode,
+    traders: traderList.length ? traderList : (same?.traders ?? []),
     maps: mapsV ? mapsV.maps : (same?.maps ?? []),
     tasks: tasksOk
       ? rawTasks.map((t) => toTask(t, tasksV!.ru, traderNames, mapsV!.mapIdToName, itemName))

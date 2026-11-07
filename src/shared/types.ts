@@ -45,6 +45,14 @@ export interface TaskObjective {
   maps: string[]
   points: MapPoint[]
   hints: string[] // что взять с собой и на что обратить внимание
+  bring: BringItem[] // что нужно иметь при себе в рейде для этой цели
+}
+
+/** Предмет, который нужно взять в рейд: ключ, закладка, маркер и т.п. */
+export interface BringItem {
+  name: string // несколько подходящих предметов — через «или»
+  count: number
+  kind: 'key' | 'plant' | 'mark' | 'use' | 'questItem'
 }
 
 export interface Task {
@@ -56,7 +64,7 @@ export interface Task {
   kappaRequired: boolean
   wikiLink: string
   requires: { taskId: string; status: string[] }[]
-  neededKeys: string[] // ключи, которые понадобятся
+  neededKeys: { map: string | null; keys: string[] }[] // ключи, которые понадобятся, по картам
   objectives: TaskObjective[]
 }
 
@@ -74,9 +82,17 @@ export interface Item {
   usedInTasks: string[]
 }
 
+export interface TraderInfo {
+  id: string
+  name: string
+  normalizedName: string
+  resetTime: string | null // когда обновится ассортимент (ISO)
+}
+
 export interface GameData {
   fetchedAt: number
   gameMode: GameMode
+  traders: TraderInfo[]
   maps: MapInfo[]
   tasks: Task[]
   items: Item[]
@@ -131,6 +147,21 @@ export interface QuestGuide {
   html: string
 }
 
+/** Доклад о Кочевниках (Отступники: Big Pipe, Birdeye, Knight) с tarkov.help. */
+export interface GoonReport {
+  map: string | null // normalizedName карты в приложении
+  mapName: string
+  reporter: string
+  at: number // примерное время доклада, мс
+}
+
+export interface GoonsState {
+  last: GoonReport | null
+  history: GoonReport[] // все доклады за последние часы, новые первыми
+  fetchedAt: number
+  error: string | null
+}
+
 export type OverlayMode = 'hidden' | 'full'
 
 export interface Api {
@@ -143,6 +174,7 @@ export interface Api {
   setPlayerLevel(level: number): Promise<Progress>
   setObjectiveDone(objectiveId: string, done: boolean): Promise<Progress>
   getGuide(taskName: string): Promise<QuestGuide | null>
+  getGoons(): Promise<GoonsState>
   importFromLogs(): Promise<number>
   getLive(): Promise<LiveState>
   setCurrentMap(map: string | null): Promise<void>
@@ -150,5 +182,8 @@ export interface Api {
   searchItems(query: string): Promise<Item[]>
   setOverlayMode(mode: OverlayMode): Promise<void>
   pickFolder(): Promise<string | null>
-  on(channel: 'data' | 'live' | 'progress' | 'price' | 'overlay-mode' | 'settings', cb: (payload: any) => void): () => void
+  on(
+    channel: 'data' | 'live' | 'progress' | 'price' | 'overlay-mode' | 'settings' | 'goons',
+    cb: (payload: any) => void
+  ): () => void
 }

@@ -4,6 +4,15 @@ import { questState } from './questLogic'
 
 export type Faction = 'pmc' | 'scav'
 
+/** Сторона, за которую играет пользователь (выбирается на карте, помним между запусками). */
+export function loadFaction(): Faction {
+  try {
+    return localStorage.getItem('faction') === 'scav' ? 'scav' : 'pmc'
+  } catch {
+    return 'pmc'
+  }
+}
+
 export interface MarkerOptions {
   quests: boolean
   extracts: boolean

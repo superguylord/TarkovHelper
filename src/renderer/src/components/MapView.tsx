@@ -40,8 +40,9 @@ export interface MapMarker {
   outline?: { x: number; z: number }[] // контур зоны квеста
   label: string
   detail?: string
-  kind: 'quest' | 'quest-selected' | 'extract' | 'extract-shared' | 'transit'
+  kind: 'quest' | 'quest-selected' | 'extract' | 'extract-shared' | 'transit' | 'route'
   taskId?: string
+  num?: number // номер точки маршрута рейда
 }
 
 interface Props {
@@ -49,12 +50,13 @@ interface Props {
   markers: MapMarker[]
   position: PlayerPosition | null
   focus?: Point3[] | null // показать эти точки целиком (например, выбранный квест)
+  path?: Point3[] | null // линия маршрута рейда
   onMarkerClick?: (marker: MapMarker) => void
 }
 
 const svgCache = new Map<string, Promise<string>>()
 
-export function MapView({ map, markers, position, focus, onMarkerClick }: Props) {
+export function MapView({ map, markers, position, focus, path, onMarkerClick }: Props) {
   const el = useRef<HTMLDivElement>(null)
   const lmap = useRef<L.Map | null>(null)
   const markerLayer = useRef<L.LayerGroup | null>(null)
@@ -118,10 +120,26 @@ export function MapView({ map, markers, position, focus, onMarkerClick }: Props)
     const layer = markerLayer.current
     if (!layer) return
     layer.clearLayers()
-    const isQuest = (k: MapMarker['kind']) => k === 'quest' || k === 'quest-selected'
-    // выбранный квест рисуем последним, чтобы он был поверх остальных
-    const sorted = [...markers].sort((a, b) => Number(a.kind === 'quest-selected') - Number(b.kind === 'quest-selected'))
+    const isQuest = (k: MapMarker['kind']) => k === 'quest' || k === 'quest-selected' || k === 'route'
+    if (path && path.length > 1) {
+      layer.addLayer(L.polyline(path.map(toLatLng), { className: 'route-line', interactive: false }))
+    }
+    // выбранный квест и маршрут рисуем последними, чтобы они были поверх остальных
+    const weight = (k: MapMarker['kind']) => (k === 'route' ? 2 : k === 'quest-selected' ? 1 : 0)
+    const sorted = [...markers].sort((a, b) => weight(a.kind) - weight(b.kind))
     for (const mk of sorted) {
+      if (mk.num != null) {
+        const numbered = L.marker(toLatLng(mk.point), {
+          icon: L.divIcon({ className: 'route-icon', html: `<div class="route-num">${mk.num}</div>`, iconSize: [26, 26], iconAnchor: [13, 13] })
+        })
+        numbered.bindTooltip(`<b>${escapeHtml(mk.label)}</b>${mk.detail ? `<br>${escapeHtml(mk.detail)}` : ''}`, {
+          className: 'mk-tip',
+          direction: 'top',
+          offset: [0, -10]
+        })
+        layer.addLayer(numbered)
+        continue
+      }
       if (mk.outline) {
         layer.addLayer(
           L.polygon(
@@ -144,14 +162,19 @@ export function MapView({ map, markers, position, focus, onMarkerClick }: Props)
       if (onMarkerClick) marker.on('click', () => onMarkerClick(mk))
       layer.addLayer(marker)
     }
-  }, [markers, map, onMarkerClick])
+  }, [markers, map, path, onMarkerClick])
 
   // приблизить к выбранным точкам
   useEffect(() => {
     const m = lmap.current
     if (!m || !focus?.length) return
     const b = L.latLngBounds(focus.map(toLatLng))
-    m.flyToBounds(b.pad(0.4), { maxZoom: (map.maxZoom ?? 6) - 1, duration: 0.6 })
+    // сразу после открытия раздела контейнер карты ещё не получил размер — ждём кадр
+    const t = setTimeout(() => {
+      m.invalidateSize()
+      m.flyToBounds(b.pad(0.15), { maxZoom: (map.maxZoom ?? 6) - 1, duration: 0.6 })
+    }, 80)
+    return () => clearTimeout(t)
   }, [focus, map])
 
   // позиция игрока: стрелка, повёрнутая по направлению взгляда

@@ -2,17 +2,11 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { AppState } from '../useAppState'
 import { MapView, type MapMarker } from '../components/MapView'
 import { QuestPage } from './QuestPage'
-import { buildMarkers, questsOnMap, type Faction } from '../mapMarkers'
+import { buildMarkers, loadFaction, questsOnMap, type Faction } from '../mapMarkers'
+import type { Nav } from '../MainApp'
+import type { Point3 } from '@shared/types'
 
-function loadFaction(): Faction {
-  try {
-    return localStorage.getItem('faction') === 'scav' ? 'scav' : 'pmc'
-  } catch {
-    return 'pmc'
-  }
-}
-
-export function MapPage({ s }: { s: AppState }) {
+export function MapPage({ s, nav }: { s: AppState; nav: Nav }) {
   const { data, live, progress } = s
   const [selected, setSelected] = useState<string | null>(null)
   const [opts, setOpts] = useState({ quests: true, extracts: true })
@@ -24,6 +18,11 @@ export function MapPage({ s }: { s: AppState }) {
   useEffect(() => {
     if (live?.currentMap) setSelected(live.currentMap)
   }, [live?.currentMap])
+
+  // план из брифинга — открываем его карту (после автоматического выбора текущей карты)
+  useEffect(() => {
+    if (nav.plan) setSelected(nav.plan.map)
+  }, [nav.plan])
 
   // в начале рейда сразу показываем выходы
   useEffect(() => {
@@ -44,14 +43,38 @@ export function MapPage({ s }: { s: AppState }) {
     [data, map, progress]
   )
   const task = quests.find((t) => t.id === taskId) ?? null
-  const markers = useMemo(
-    () => (data && map ? buildMarkers(data, map, progress, { ...opts, faction, selectedTask: taskId }) : []),
-    [data, map, progress, opts, faction, taskId]
-  )
-  // приближаем к точкам выбранного квеста
+  const route = nav.plan && map && nav.plan.map === map.normalizedName ? nav.plan : null
+  const position = live?.position ?? null
+  const markers = useMemo(() => {
+    if (!data || !map) return []
+    const list = buildMarkers(data, map, progress, { ...opts, faction, selectedTask: taskId })
+    if (route) {
+      route.stops.forEach((st, i) =>
+        list.push({ id: `route-${i}`, point: st.point, label: st.taskName, detail: st.objective.description, kind: 'route', num: i + 1, taskId: st.taskId })
+      )
+      if (route.extract?.position) {
+        list.push({ id: 'route-exit', point: route.extract.position, label: `Выход: ${route.extract.name}`, detail: route.extract.note, kind: 'route', num: route.stops.length + 1 })
+      }
+    }
+    return list
+  }, [data, map, progress, opts, faction, taskId, route])
+  // линия маршрута: от игрока (если план строился от его позиции) через все точки к выходу
+  const path = useMemo<Point3[] | null>(() => {
+    if (!route) return null
+    const pts: Point3[] = route.stops.map((st) => st.point)
+    if (route.startFromPlayer && position) pts.unshift(position)
+    if (route.extract?.position) pts.push(route.extract.position)
+    return pts
+  }, [route, position])
+  // приближаем к точкам выбранного квеста или ко всему маршруту
   const focus = useMemo(
-    () => (task && map ? task.objectives.flatMap((o) => o.points.filter((p) => p.map === map.normalizedName)) : null),
-    [task, map]
+    () =>
+      task && map
+        ? task.objectives.flatMap((o) => o.points.filter((p) => p.map === map.normalizedName))
+        : route
+          ? route.stops.map((st) => st.point)
+          : null,
+    [task, map, route]
   )
   const onMarkerClick = useCallback((mk: MapMarker) => mk.taskId && setTaskId(mk.taskId), [])
 
@@ -149,7 +172,17 @@ export function MapPage({ s }: { s: AppState }) {
       </aside>
 
       <div className="map-wrap">
-        <MapView map={map} markers={markers} position={pos} focus={focus} onMarkerClick={onMarkerClick} />
+        <MapView map={map} markers={markers} position={pos} focus={focus} path={path} onMarkerClick={onMarkerClick} />
+        {route && !task && (
+          <div className="quest-chip">
+            <span className="quest-chip-name">
+              Маршрут рейда · точек: {route.stops.length}{route.extract ? ` → ${route.extract.name}` : ''}
+            </span>
+            <button className="drawer-close" onClick={() => nav.setPlan(null)} title="Убрать маршрут">
+              ×
+            </button>
+          </div>
+        )}
         {task && (
           <div className="quest-chip">
             <span className="quest-chip-name">{task.name}</span>

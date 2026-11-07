@@ -11,6 +11,7 @@ const api: Api = {
   setPlayerLevel: (level) => ipcRenderer.invoke('progress:level', level),
   setObjectiveDone: (id, done) => ipcRenderer.invoke('progress:objective', id, done),
   getGuide: (name) => ipcRenderer.invoke('guide:get', name),
+  getGoons: () => ipcRenderer.invoke('goons:get'),
   importFromLogs: () => ipcRenderer.invoke('progress:import'),
   getLive: () => ipcRenderer.invoke('live:get'),
   setCurrentMap: (map) => ipcRenderer.invoke('live:map', map),

@@ -2,13 +2,14 @@ import { app, BrowserWindow, dialog, globalShortcut, ipcMain, screen, shell } fr
 import { execSync } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
-import type { GameData, GameMode, LiveState, OverlayMode, Progress, Settings, TaskStatus } from '@shared/types'
+import type { GameData, GameMode, GoonsState, LiveState, OverlayMode, Progress, Settings, TaskStatus } from '@shared/types'
 import { readJson, writeJson } from './store'
 import { fetchGameData, loadCached } from './tarkovData'
 import { LogWatcher } from './logWatcher'
 import { ScreenshotWatcher } from './screenshotWatcher'
 import { matchItems, scanPrice, warmUpOcr } from './priceScanner'
 import { getGuide } from './tarkovHelp'
+import { fetchGoons } from './goons'
 
 // ---------- состояние ----------
 
@@ -98,6 +99,32 @@ async function loadData(force = false): Promise<void> {
     loading = false
     pushLive()
   }
+}
+
+// ---------- Кочевники ----------
+
+let goons: GoonsState = { last: null, history: [], fetchedAt: 0, error: null }
+
+const normName = (s: string) => s.toLowerCase().replace(/ё/g, 'е').replace(/[^a-zа-я0-9]/g, '')
+
+/** Карта из доклада tarkov.help -> карта приложения (по ключу или русскому названию). */
+function resolveGoonMap(key: string, name: string): string | null {
+  const maps = data?.maps ?? []
+  const k = normName(key)
+  return (
+    maps.find((m) => normName(m.normalizedName) === k || m.nameIds.some((id) => normName(id) === k))?.normalizedName ??
+    maps.find((m) => normName(m.name) === normName(name))?.normalizedName ??
+    null
+  )
+}
+
+async function refreshGoons(): Promise<void> {
+  try {
+    goons = await fetchGoons(resolveGoonMap)
+  } catch (e) {
+    goons = { ...goons, error: String((e as Error).message ?? e) }
+  }
+  send('goons', goons)
 }
 
 // ---------- прогресс ----------
@@ -278,6 +305,7 @@ function registerIpc(): void {
     send('progress', progress)
     return progress
   })
+  ipcMain.handle('goons:get', () => goons)
   ipcMain.handle('guide:get', async (_e, name: string) => {
     try {
       return await getGuide(name)
@@ -326,9 +354,11 @@ app.whenReady().then(() => {
   registerHotkeys()
   logs.start()
   shots.start()
-  loadData()
   setInterval(() => loadData(), 15 * 60 * 1000) // цены меняются — освежаем раз в час (см. stale)
   warmUpOcr()
+  // карты в докладах сопоставляются с данными игры — поэтому первый запрос после загрузки данных
+  loadData().finally(refreshGoons)
+  setInterval(refreshGoons, 2 * 60 * 1000) // доклады о Кочевниках приходят часто — проверяем каждые 2 минуты
 })
 
 app.on('second-instance', () => {
