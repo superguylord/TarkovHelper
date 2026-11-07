@@ -15,7 +15,7 @@ function loadFaction(): Faction {
 export function MapPage({ s }: { s: AppState }) {
   const { data, live, progress } = s
   const [selected, setSelected] = useState<string | null>(null)
-  const [opts, setOpts] = useState({ quests: true, available: false, extracts: true })
+  const [opts, setOpts] = useState({ quests: true, extracts: true })
   const [faction, setFaction] = useState<Faction>(loadFaction)
   const [taskId, setTaskId] = useState<string | null>(null) // квест, подсвеченный на карте
   const [pageTaskId, setPageTaskId] = useState<string | null>(null) // квест, открытый на отдельной странице
@@ -40,8 +40,8 @@ export function MapPage({ s }: { s: AppState }) {
 
   const map = data?.maps.find((m) => m.normalizedName === selected) ?? data?.maps[0]
   const quests = useMemo(
-    () => (data && map ? questsOnMap(data, map, progress, opts.available) : []),
-    [data, map, progress, opts.available]
+    () => (data && map ? questsOnMap(data, map, progress) : []),
+    [data, map, progress]
   )
   const task = quests.find((t) => t.id === taskId) ?? null
   const markers = useMemo(
@@ -127,9 +127,6 @@ export function MapPage({ s }: { s: AppState }) {
         <div className="eyebrow">Слои</div>
         <label className="check">
           <input type="checkbox" checked={opts.quests} onChange={() => toggle('quests')} /> Мои квесты
-        </label>
-        <label className="check">
-          <input type="checkbox" checked={opts.available} onChange={() => toggle('available')} /> + доступные, но не взятые
         </label>
         <label className="check">
           <input type="checkbox" checked={opts.extracts} onChange={() => toggle('extracts')} /> Выходы

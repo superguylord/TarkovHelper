@@ -6,7 +6,6 @@ export type Faction = 'pmc' | 'scav'
 
 export interface MarkerOptions {
   quests: boolean
-  available: boolean // показывать и ещё не взятые, но доступные квесты
   extracts: boolean
   faction: Faction
   selectedTask: string | null
@@ -18,11 +17,10 @@ const isKill = (o: TaskObjective) => o.type === 'shoot'
 const objectiveOnMap = (o: TaskObjective, map: string) =>
   o.points.some((p) => p.map === map) || o.maps.includes(map)
 
-/** Квесты, по которым на этой карте есть что делать (с учётом отмеченных целей). */
-export function questsOnMap(data: GameData, map: MapInfo, progress: Progress, available: boolean): Task[] {
+/** Взятые квесты, по которым на этой карте есть что делать (с учётом отмеченных целей). */
+export function questsOnMap(data: GameData, map: MapInfo, progress: Progress): Task[] {
   return data.tasks.filter((t) => {
-    const st = questState(t, progress)
-    if (st !== 'active' && !(available && st === 'available')) return false
+    if (questState(t, progress) !== 'active') return false
     return t.objectives.some(
       (o) => !progress.objectives[o.id] && (objectiveOnMap(o, map.normalizedName) || t.map === map.normalizedName)
     )
@@ -33,7 +31,7 @@ export function questsOnMap(data: GameData, map: MapInfo, progress: Progress, av
 export function buildMarkers(data: GameData, map: MapInfo, progress: Progress, opts: MarkerOptions): MapMarker[] {
   const out: MapMarker[] = []
   if (opts.quests) {
-    for (const task of questsOnMap(data, map, progress, opts.available)) {
+    for (const task of questsOnMap(data, map, progress)) {
       const selected = task.id === opts.selectedTask
       for (const obj of task.objectives) {
         if (isKill(obj) || progress.objectives[obj.id]) continue
