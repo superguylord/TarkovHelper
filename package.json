@@ -1,7 +1,7 @@
 {
   "name": "tarkov-helper",
   "productName": "TarkovHelper",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "private": true,
   "description": "Личный помощник для Escape from Tarkov: карта, квесты, цены",
   "main": "out/main/index.js",
@@ -10,8 +10,8 @@
     "build": "electron-vite build",
     "start": "electron-vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
-    "dist": "electron-vite build && electron-builder --win portable",
-    "pack": "electron-vite build && electron-builder --dir"
+    "pack": "electron-vite build && electron-builder --dir",
+    "installer": "electron-vite build && electron-builder --win nsis"
   },
   "build": {
     "appId": "local.tarkovhelper",
@@ -27,6 +27,19 @@
     "win": {
       "target": "dir",
       "icon": "build/icon.png"
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "createDesktopShortcut": "always",
+      "createStartMenuShortcut": true,
+      "shortcutName": "TarkovHelper",
+      "artifactName": "TarkovHelper-Setup-${version}.${ext}",
+      "installerLanguages": [
+        "ru_RU"
+      ],
+      "language": "1049",
+      "deleteAppDataOnUninstall": false
     }
   },
   "dependencies": {
@@ -48,5 +61,6 @@
     "electron-vite": "^6.0.0",
     "typescript": "^7.0.2",
     "vite": "^8.3.6"
-  }
+  },
+  "author": "Anton"
 }

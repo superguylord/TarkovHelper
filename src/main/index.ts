@@ -1,9 +1,9 @@
 import { app, BrowserWindow, dialog, globalShortcut, ipcMain, screen, shell } from 'electron'
-import { execSync } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import type { GameData, GameMode, GoonsState, LiveState, OverlayMode, Progress, Settings, TaskStatus } from '@shared/types'
 import { readJson, writeJson } from './store'
+import { detectGamePath } from './gamePath'
 import { fetchGameData, loadCached } from './tarkovData'
 import { LogWatcher } from './logWatcher'
 import { ScreenshotWatcher } from './screenshotWatcher'
@@ -12,20 +12,6 @@ import { getGuide } from './tarkovHelp'
 import { fetchGoons } from './goons'
 
 // ---------- состояние ----------
-
-function detectGamePath(): string {
-  try {
-    const out = execSync(
-      'reg query "HKLM\\SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\EscapeFromTarkov" /v InstallLocation',
-      { encoding: 'utf8' }
-    )
-    const m = /InstallLocation\s+REG_SZ\s+(.+)/.exec(out)
-    if (m) return m[1].trim()
-  } catch {
-    /* игра не найдена в реестре */
-  }
-  return 'C:\\Battlestate Games\\Escape from Tarkov'
-}
 
 const defaultSettings = (): Settings => ({
   gamePath: detectGamePath(),
@@ -346,7 +332,14 @@ app.whenReady().then(() => {
   const pick = <T extends object>(base: T, from: any): T =>
     Object.fromEntries(Object.keys(base).map((k) => [k, from?.[k] ?? (base as any)[k]])) as T
   settings = { ...pick(defaults, saved), hotkeys: pick(defaults.hotkeys, saved.hotkeys) }
-  if (!existsSync(settings.gamePath)) live.logStatus = 'Папка игры не найдена — укажите её в настройках'
+  // игру переустановили или настройки перенесли с другого компьютера — ищем папку заново
+  if (!existsSync(settings.gamePath)) {
+    const found = detectGamePath()
+    if (existsSync(found)) {
+      settings.gamePath = found
+      writeJson('settings.json', settings)
+    } else live.logStatus = 'Папка игры не найдена — укажите её в настройках'
+  }
 
   registerIpc()
   createMainWindow()
