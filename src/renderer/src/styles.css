@@ -1,21 +1,26 @@
-/* Палитра в духе Raid OS: тёмно-оливковый фон, латунные акценты */
+/* Тёмная тема «чёрный хаки»: почти чёрный фон с тёплым оливково-песочным оттенком, латунные акценты */
 :root {
   color-scheme: dark;
-  --bg: #0a0f0c;
-  --bg-elevated: #101713;
-  --panel: #141d18;
-  --panel-2: #19241e;
-  --panel-3: #202d25;
-  --line: #2b3a30;
-  --line-strong: #3b4d40;
-  --text: #edf2ed;
-  --text-muted: #97a49a;
-  --text-dim: #69766d;
+  --bg: #0b0c08;
+  --bg-elevated: #111209;
+  --panel: rgba(25, 26, 18, 0.92);
+  --panel-2: #1c1d14;
+  --panel-3: #25271b;
+  --line: #2d2f22;
+  --line-strong: #3e412e;
+  --text: #ebe9dc;
+  --text-muted: #a6a38c;
+  --text-dim: #6f6d5a;
   --brass: #c4a665;
   --brass-strong: #dfbd70;
-  --green: #7fa183;
-  --green-soft: #263c2c;
-  --blue: #7899a5;
+  --green: #8f9d6a;
+  --green-soft: #2c3220;
+  --blue: #7f97a0;
+  /* фон: два мягких пятна цвета хаки и едва заметное «зерно» ткани */
+  --backdrop:
+    radial-gradient(ellipse 70% 55% at 10% 0%, rgba(118, 110, 64, 0.14), transparent 70%),
+    radial-gradient(ellipse 55% 50% at 100% 100%, rgba(86, 92, 50, 0.11), transparent 70%),
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0.58 0 0 0 0 0.54 0 0 0 0 0.36 0 0 0 0.06 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
   --amber: #d29b58;
   --danger: #bd6d60;
   --radius-sm: 8px;
@@ -32,7 +37,7 @@ body {
   font-size: 14px;
   color: var(--text);
 }
-body.main { background: var(--bg); }
+body.main { background: var(--backdrop), var(--bg); background-attachment: fixed; }
 body.overlay { background: transparent; overflow: hidden; }
 
 button, input, select { font: inherit; color: inherit; }
@@ -94,8 +99,8 @@ code, kbd {
   cursor: pointer;
 }
 .btn:hover { background: var(--panel-3); }
-.btn-brass { background: #4a3f26; border-color: var(--brass); color: var(--brass-strong); }
-.btn-brass:hover { background: #5a4c2c; }
+.btn-brass { background: #463b22; border-color: var(--brass); color: var(--brass-strong); }
+.btn-brass:hover { background: #56492a; }
 
 input:not([type]), input[type='number'], select {
   background: var(--panel);
@@ -140,7 +145,7 @@ input:focus, select:focus { border-color: var(--brass); }
   flex-shrink: 0;
   padding: 4px 16px 16px;
   border-right: 1px solid var(--line);
-  background: var(--bg-elevated);
+  background: rgba(17, 18, 9, 0.75);
   overflow: auto;
 }
 .side .check { margin: 6px 0; }
@@ -198,11 +203,11 @@ input:focus, select:focus { border-color: var(--brass); }
 .map-btn.active { color: var(--text); background: var(--panel-3); border-color: var(--line-strong); }
 .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--green); box-shadow: 0 0 8px var(--green); }
 
-.map { flex: 1; height: 100%; background: #0d1410; }
-.leaflet-container { background: #0d1410; font-family: var(--font); }
+.map { flex: 1; height: 100%; background: #0e0f0a; }
+.leaflet-container { background: #0e0f0a; font-family: var(--font); }
 .map-svg { opacity: 0.95; }
 .leaflet-control-zoom a { background: var(--panel-2) !important; color: var(--text) !important; border-color: var(--line) !important; }
-.leaflet-control-attribution { background: rgba(10, 15, 12, 0.7) !important; color: var(--text-dim) !important; }
+.leaflet-control-attribution { background: rgba(11, 12, 8, 0.7) !important; color: var(--text-dim) !important; }
 .leaflet-control-attribution a { color: var(--text-muted) !important; }
 
 .map-icon { background: none; border: none; }
@@ -211,7 +216,7 @@ input:focus, select:focus { border-color: var(--brass); }
 .zone-quest { stroke: var(--brass); fill: var(--brass); }
 .zone-quest-selected { stroke: #ff9d3c; fill: #ff9d3c; fill-opacity: 0.22; stroke-width: 2.5; }
 .leaflet-tooltip.mk-tip {
-  background: rgba(16, 23, 19, 0.94);
+  background: rgba(20, 21, 14, 0.95);
   color: var(--text);
   border: 1px solid var(--line-strong);
   border-radius: 8px;
@@ -293,14 +298,14 @@ input:focus, select:focus { border-color: var(--brass); }
 }
 .overlay-full {
   position: fixed; inset: 0;
-  background: rgba(5, 8, 6, 0.55);
+  background: rgba(6, 6, 4, 0.55);
   display: grid; place-items: center;
 }
 .overlay-panel {
   width: min(1400px, 92vw);
   height: min(900px, 90vh);
   display: flex; flex-direction: column;
-  background: rgba(10, 15, 12, 0.96);
+  background: var(--backdrop), rgba(11, 12, 8, 0.97);
   border: 1px solid var(--line-strong);
   border-radius: var(--radius-lg);
   overflow: hidden;
@@ -313,7 +318,7 @@ input:focus, select:focus { border-color: var(--brass); }
   z-index: 1000;
   display: flex; align-items: center; gap: 10px;
   padding: 6px 8px 6px 14px;
-  background: rgba(16, 23, 19, 0.96);
+  background: rgba(20, 21, 14, 0.96);
   border: 1px solid var(--brass);
   border-radius: 999px;
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
@@ -352,7 +357,7 @@ input:focus, select:focus { border-color: var(--brass); }
   display: flex; flex-direction: column;
   padding: 16px 12px 14px;
   border-right: 1px solid var(--line);
-  background: linear-gradient(180deg, var(--bg-elevated), var(--bg));
+  background: linear-gradient(180deg, rgba(17, 18, 9, 0.85), rgba(11, 12, 8, 0.6));
   overflow: auto;
 }
 .sidebar .logo { padding: 0 6px 10px; }
@@ -444,19 +449,36 @@ input:focus, select:focus { border-color: var(--brass); }
 .bring-count { color: var(--brass-strong); }
 .bring-meta { font-size: 12px; color: var(--text-muted); }
 
-/* ---------- торговцы ---------- */
-.traders { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 12px; }
-.trader { padding: 14px 16px; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius-md); display: flex; flex-direction: column; gap: 8px; }
-.trader-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: 2px 10px; }
-.trader-name { font-family: var(--font-display); font-weight: 500; font-size: 22px; letter-spacing: 0.5px; }
-.trader-reset { font-size: 12px; color: var(--text-dim); white-space: nowrap; }
-.trader-stats { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 12.5px; color: var(--text-muted); }
-.trader-stats span { white-space: nowrap; }
-.trader-stats b { color: var(--text); }
-.trader-quests { display: flex; flex-wrap: wrap; gap: 6px; }
-.trader-quest {
-  padding: 4px 9px; font-size: 12.5px;
-  border: 1px solid #4a3f26; border-radius: 6px;
-  background: var(--panel-2); color: var(--brass-strong); cursor: pointer;
+/* ---------- торговцы: цены ---------- */
+.traders-page .toolbar { margin-top: 4px; }
+.tp-traders { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 14px; }
+.tp-list { display: flex; flex-direction: column; gap: 4px; max-width: 1100px; }
+.tp-row {
+  display: grid; grid-template-columns: 40px 1fr 190px 120px 120px; align-items: center; gap: 12px;
+  padding: 6px 12px;
+  border: 1px solid var(--line); border-radius: var(--radius-sm);
+  background: var(--panel); color: var(--text); text-align: left; cursor: pointer;
 }
-.trader-quest:hover { border-color: var(--brass); }
+.tp-row:hover { border-color: var(--line-strong); background: var(--panel-2); }
+.tp-row img { width: 36px; height: 36px; object-fit: contain; }
+.tp-row-head { background: none; border-color: transparent; cursor: default; font-size: 11px; letter-spacing: 1.5px; text-transform: uppercase; color: var(--text-dim); }
+.tp-row-head:hover { background: none; border-color: transparent; }
+.tp-name { display: flex; flex-direction: column; font-weight: 600; }
+.tp-name small { font-weight: 400; color: var(--text-dim); }
+.num { text-align: right; font-variant-numeric: tabular-nums; }
+
+.tp-item .btn { margin-bottom: 14px; }
+.tp-item-head { display: flex; align-items: center; gap: 14px; margin-bottom: 16px; }
+.tp-item-head img { width: 72px; height: 72px; object-fit: contain; background: var(--panel-3); border-radius: var(--radius-sm); }
+.tp-item-name { font-family: var(--font-display); font-weight: 500; font-size: 26px; letter-spacing: 0.5px; }
+.tp-columns { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; max-width: 1200px; }
+.tp-box { padding: 14px 16px; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius-md); }
+.tp-table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+.tp-table td { padding: 7px 8px; border-bottom: 1px solid var(--line); }
+.tp-table tr:last-child td { border-bottom: none; }
+.tp-table tr.best td { color: var(--brass-strong); font-weight: 600; }
+.tp-table tr.best td.muted { font-weight: 400; }
+.lvl { margin-left: 4px; padding: 0 5px; border: 1px solid var(--line-strong); border-radius: 4px; font-size: 11px; color: var(--text-muted); }
+.tp-flea { margin-top: 10px; font-size: 13px; color: var(--text-muted); }
+.tp-flea .up { color: var(--green); }
+.tp-flea .down { color: var(--brass); }

@@ -214,8 +214,22 @@ function toTask(t: any, ru: Dict, traders: Dict, mapName: Dict, name: (id: strin
   }
 }
 
-function toItem(i: any, ru: Dict, traders: Dict, usedIn: Map<string, string[]>): Item {
-  const best = [...(i.sellToTrader ?? [])].sort((a: any, b: any) => b.priceRUB - a.priceRUB)[0]
+function toItem(i: any, ru: Dict, traders: Dict, usedIn: Map<string, string[]>, taskNames: Dict): Item {
+  const sellTo = (i.sellToTrader ?? [])
+    .map((s: any) => ({ trader: traders[s.trader] ?? '', price: s.price, currency: s.currency, priceRUB: s.priceRUB }))
+    .sort((a: any, b: any) => b.priceRUB - a.priceRUB)
+  const buyFrom = (i.buyFromTrader ?? [])
+    .map((b: any) => ({
+      trader: traders[b.trader] ?? '',
+      price: b.price,
+      currency: b.currency,
+      priceRUB: b.priceRUB,
+      level: b.minTraderLevel ?? 1,
+      taskUnlock: b.taskUnlock ? (taskNames[b.taskUnlock] ?? null) : null,
+      buyLimit: b.buyLimit || null
+    }))
+    .sort((a: any, b: any) => a.priceRUB - b.priceRUB)
+  const best = sellTo[0]
   return {
     id: i.id,
     name: tr(ru, i.name),
@@ -226,7 +240,9 @@ function toItem(i: any, ru: Dict, traders: Dict, usedIn: Map<string, string[]>):
     width: i.width ?? 1,
     height: i.height ?? 1,
     iconLink: i.iconLink ?? '',
-    bestTrader: best ? { name: traders[best.trader] ?? '', price: best.priceRUB } : null,
+    bestTrader: best ? { name: best.trader, price: best.priceRUB } : null,
+    sellTo,
+    buyFrom,
     usedInTasks: usedIn.get(i.id) ?? []
   }
 }
@@ -249,7 +265,7 @@ function itemsUsedInTasks(tasks: any[]): Map<string, string[]> {
 }
 
 // версия в имени: при смене формата данных старый кэш просто не читается
-const cacheName = (mode: GameMode) => `gamedata-v3-${mode}.json`
+const cacheName = (mode: GameMode) => `gamedata-v4-${mode}.json`
 
 export function loadCached(mode: GameMode): GameData | null {
   const d = readJson<GameData | null>(cacheName(mode), null)
@@ -296,6 +312,8 @@ export async function fetchGameData(
   const mapsV = maps.status === 'fulfilled' ? buildMaps(maps.value, itemName) : null
   const rawTasks = tasksV ? Object.values<any>(tasksV.data.tasks) : []
   const usedIn = itemsUsedInTasks(rawTasks)
+  const taskNames: Dict = {}
+  if (tasksV) for (const t of rawTasks) taskNames[t.id] = tr(tasksV.ru, t.name)
   // без торговцев и карт квесты получатся неполными — тогда оставляем прошлые
   const tradersOk = traders.status === 'fulfilled'
   const tasksOk = !!tasksV && tradersOk && !!mapsV
@@ -310,7 +328,7 @@ export async function fetchGameData(
       ? rawTasks.map((t) => toTask(t, tasksV!.ru, traderNames, mapsV!.mapIdToName, itemName))
       : (same?.tasks ?? []),
     items: itemsOk
-      ? Object.values<any>(itemsV!.data.items).map((i) => toItem(i, itemsV!.ru, traderNames, usedIn))
+      ? Object.values<any>(itemsV!.data.items).map((i) => toItem(i, itemsV!.ru, traderNames, usedIn, taskNames))
       : (same?.items ?? [])
   }
   const complete = !!mapsV && tasksOk && itemsOk

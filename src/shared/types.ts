@@ -79,7 +79,22 @@ export interface Item {
   height: number
   iconLink: string
   bestTrader: { name: string; price: number } | null
+  sellTo: TraderPrice[] // сколько дают торговцы, от большего к меньшему
+  buyFrom: TraderOffer[] // где купить у торговцев, от дешёвого к дорогому
   usedInTasks: string[]
+}
+
+export interface TraderPrice {
+  trader: string
+  price: number // в валюте торговца
+  currency: string // RUB | USD | EUR
+  priceRUB: number
+}
+
+export interface TraderOffer extends TraderPrice {
+  level: number // нужный уровень лояльности
+  taskUnlock: string | null // квест, который открывает товар
+  buyLimit: number | null
 }
 
 export interface TraderInfo {

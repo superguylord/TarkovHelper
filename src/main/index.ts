@@ -196,7 +196,7 @@ function createMainWindow(): void {
     height: 860,
     minWidth: 1000,
     minHeight: 640,
-    backgroundColor: '#0a0f0c',
+    backgroundColor: '#0b0c08',
     title: 'TarkovHelper',
     autoHideMenuBar: true,
     webPreferences: { preload }
