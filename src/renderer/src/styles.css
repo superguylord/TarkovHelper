@@ -488,6 +488,9 @@ input:focus, select:focus { border-color: var(--brass); }
 .map.style-night .leaflet-tile-pane { filter: saturate(0.55) hue-rotate(-12deg) brightness(0.55) contrast(1.35); }
 .map.style-detailed .leaflet-tile-pane { filter: saturate(0.85) brightness(0.92); }
 .map.style-night { background: #090b0c; }
+/* «Схема» — как на tarkov.help: светлые здания на тёмно-сером */
+.map.style-scheme .leaflet-tile-pane { filter: grayscale(1) contrast(1.55) brightness(1.08); }
+.map.style-scheme { background: #262626; }
 .zone-dim { opacity: 0.35; }
 .seg-wrap { flex-wrap: wrap; }
 
@@ -549,3 +552,46 @@ input:focus, select:focus { border-color: var(--brass); }
 /* ---------- обновления ---------- */
 .update-note { padding: 0 4px; }
 .row-buttons { display: flex; gap: 8px; flex-wrap: wrap; }
+
+/* ---------- раскладка этажей ---------- */
+.map-wrap-spread .floors { right: 12px; }
+.floor-gallery {
+  width: min(44%, 640px); flex-shrink: 0;
+  overflow: auto;
+  padding: 12px;
+  border-right: 1px solid var(--line);
+  background: rgba(14, 15, 10, 0.85);
+}
+.fg-group { margin-bottom: 14px; }
+.fg-title {
+  margin: 0 2px 6px;
+  font-family: var(--font-display); font-weight: 500; font-size: 17px; letter-spacing: 0.5px;
+  color: var(--text);
+}
+/* панели компактные: здание в кадре, а не полкарты вокруг */
+.fg-panels { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 210px)); gap: 8px; }
+.fg-panel {
+  position: relative; display: block; padding: 0;
+  height: 160px; overflow: hidden;
+  border: 1px solid var(--line-strong); border-radius: var(--radius-sm);
+  background: #0e0f0a; cursor: pointer;
+}
+.fg-panel:hover { border-color: var(--brass); }
+.fg-panel.active { border-color: #ff9d3c; box-shadow: 0 0 0 1px #ff9d3c; }
+.fg-panel .map { position: absolute; inset: 0; height: 100%; pointer-events: none; }
+.fg-label {
+  position: absolute; left: 6px; bottom: 6px; z-index: 500;
+  padding: 2px 8px; border-radius: 6px;
+  background: rgba(14, 15, 10, 0.88); border: 1px solid var(--line-strong);
+  font-size: 12px; font-weight: 600; color: var(--text);
+}
+.fg-pins {
+  position: absolute; right: 6px; top: 6px; z-index: 500;
+  min-width: 22px; padding: 1px 7px; border-radius: 999px;
+  background: var(--brass); color: #10170f; font-size: 12px; font-weight: 700; text-align: center;
+}
+.fg-here {
+  position: absolute; left: 6px; top: 6px; z-index: 500;
+  padding: 1px 7px; border-radius: 999px;
+  background: rgba(223, 189, 112, 0.92); color: #10170f; font-size: 11px; font-weight: 700;
+}

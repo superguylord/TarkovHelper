@@ -27,6 +27,7 @@ export interface MapInfo {
   svgPath?: string
   svgLayer?: string // слой основного уровня внутри SVG
   layers: MapLayer[] // этажи и подземные уровни
+  labels: { x: number; z: number; text: string }[] // подписи районов и зданий
   tilePath?: string
   tileSize?: number
   minZoom?: number
@@ -34,6 +35,7 @@ export interface MapInfo {
   transform: number[]
   coordinateRotation: number
   bounds: number[][]
+  svgBounds?: number[][] // у некоторых карт (Резерв) SVG привязан к своему прямоугольнику
   extracts: Extract[]
 }
 
@@ -42,8 +44,14 @@ export interface MapLayer {
   name: string
   svgLayer?: string
   tilePath?: string
-  // по высоте y и прямоугольникам [x1, z1, x2, z2] определяем, на каком этаже точка
-  extents: { height: [number, number]; bounds: [number, number, number, number][] }[]
+  // по высоте y и зонам зданий (прямоугольники [x1, z1, x2, z2]) определяем, на каком этаже точка;
+  // пустой список зон — этаж занимает всю карту
+  extents: { height: [number, number]; areas: MapArea[] }[]
+}
+
+export interface MapArea {
+  name: string // здание, по-русски, если известно
+  rect: [number, number, number, number]
 }
 
 export interface TaskObjective {
@@ -130,6 +138,7 @@ export interface HideoutStation {
 
 export interface GameData {
   fetchedAt: number
+  outdated?: boolean // кэш прошлой версии приложения — обновить при первой возможности
   gameMode: GameMode
   traders: TraderInfo[]
   maps: MapInfo[]
@@ -152,7 +161,7 @@ export interface Hotkeys {
   price: string // цена предмета под курсором
 }
 
-export type MapStyle = 'classic' | 'khaki' | 'night' | 'detailed'
+export type MapStyle = 'classic' | 'scheme' | 'khaki' | 'night' | 'detailed'
 
 export interface Settings {
   mapStyle: MapStyle

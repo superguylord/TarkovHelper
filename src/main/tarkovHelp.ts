@@ -1,5 +1,6 @@
 import type { QuestGuide } from '@shared/types'
 import { readJson, writeJson } from './store'
+import { httpFetch } from './http'
 import { similarity } from './similarity'
 
 // Гайды по квестам с tarkov.help: пошаговое прохождение со скриншотами мест.
@@ -44,7 +45,7 @@ async function loadIndex(force = false): Promise<Index> {
   const slugs: Record<string, string> = { ...index.slugs }
   const pages = await Promise.all(
     TRADERS.map((t) =>
-      fetch(`${SITE}/ru/trader/${t}/quests`, { headers: HEADERS })
+      httpFetch(`${SITE}/ru/trader/${t}/quests`, { headers: HEADERS })
         .then((r) => (r.ok ? r.text() : ''))
         .catch(() => '')
     )
@@ -87,7 +88,7 @@ export async function getGuide(taskName: string): Promise<QuestGuide | null> {
   }
   let guide: QuestGuide | null = null
   if (slug) {
-    const res = await fetch(`${SITE}/api/ru/quests/${encodeURIComponent(slug)}`, { headers: HEADERS })
+    const res = await httpFetch(`${SITE}/api/ru/quests/${encodeURIComponent(slug)}`, { headers: HEADERS })
     if (!res.ok) throw new Error(`tarkov.help: HTTP ${res.status}`)
     const { data } = await res.json()
     guide = { url: `${SITE}/ru/quest/${slug}`, html: data?.guide || data?.guides || '' }

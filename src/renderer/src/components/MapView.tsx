@@ -16,7 +16,7 @@ function applyRotation(latLng: L.LatLng, rotation: number): L.LatLng {
   return L.latLng(x * sin + y * cos, x * cos - y * sin)
 }
 
-function makeCrs(map: MapInfo): L.CRS {
+export function makeCrs(map: MapInfo): L.CRS {
   const [scaleX, marginX, scaleY, marginY] = map.transform
   return L.extend({}, L.CRS.Simple, {
     transformation: new L.Transformation(scaleX, marginX, -scaleY, marginY),
@@ -29,10 +29,16 @@ function makeCrs(map: MapInfo): L.CRS {
 
 const toLatLng =(p: Point3) => L.latLng(p.z, p.x)
 
-function mapBounds(map: MapInfo): L.LatLngBounds | undefined {
-  const b = map.bounds
-  if (b.length < 2) return undefined
-  return L.latLngBounds([b[0][1], b[0][0]], [b[1][1], b[1][0]])
+const toBounds = (b: number[][] | undefined) =>
+  b && b.length >= 2 ? L.latLngBounds([b[0][1], b[0][0]], [b[1][1], b[1][0]]) : undefined
+
+export function mapBounds(map: MapInfo): L.LatLngBounds | undefined {
+  return toBounds(map.bounds)
+}
+
+/** Прямоугольник, на который растянута векторная подложка. */
+export function svgBoundsOf(map: MapInfo): L.LatLngBounds | undefined {
+  return toBounds(map.svgBounds) ?? mapBounds(map)
 }
 
 export interface MapMarker {
@@ -81,12 +87,25 @@ interface Props {
   focus?: Point3[] | null // показать эти точки целиком (например, выбранный квест)
   style: MapStyle
   layer: string | null // активный этаж; null — основной уровень
+  // панель этажа: неподвижная карта, показывающая один прямоугольник [x1, z1, x2, z2] (null — всю карту)
+  inset?: { rect: [number, number, number, number] | null }
   onMarkerClick?: (marker: MapMarker) => void
 }
 
 const svgCache = new Map<string, Promise<string>>()
 
-export function MapView({ map, markers, position, focus, style, layer, onMarkerClick }: Props) {
+/** Текст SVG-подложки (один запрос на карту за сеанс). */
+export function loadSvg(path: string): Promise<string> {
+  let p = svgCache.get(path)
+  if (!p) {
+    p = fetch(path).then((r) => r.text())
+    p.catch(() => svgCache.delete(path))
+    svgCache.set(path, p)
+  }
+  return p
+}
+
+export function MapView({ map, markers, position, focus, style, layer, inset, onMarkerClick }: Props) {
   const el = useRef<HTMLDivElement>(null)
   const lmap = useRef<L.Map | null>(null)
   const markerLayer = useRef<L.LayerGroup | null>(null)
@@ -103,13 +122,23 @@ export function MapView({ map, markers, position, focus, style, layer, onMarkerC
     if (!el.current) return
     const m = L.map(el.current, {
       crs: makeCrs(map),
-      zoomSnap: 0.25,
+      zoomSnap: inset ? 0.05 : 0.25,
       minZoom: (map.minZoom ?? 1) - 2,
-      maxZoom: (map.maxZoom ?? 6) + 2
+      maxZoom: (map.maxZoom ?? 6) + 3,
+      // панель этажа неподвижна: клик по ней обрабатывает список этажей
+      ...(inset
+        ? { zoomControl: false, attributionControl: false, dragging: false, scrollWheelZoom: false, doubleClickZoom: false, boxZoom: false, keyboard: false }
+        : {})
     })
     m.attributionControl?.setPrefix(false).addAttribution('Карты: tarkov.dev (CC BY-NC-SA 4.0)')
     const bounds = mapBounds(map)
-    if (bounds) m.fitBounds(bounds)
+    const fitInset = () => {
+      const r = inset?.rect
+      const target = r ? L.latLngBounds([L.latLng(r[1], r[0]), L.latLng(r[3], r[2])]).pad(0.12) : bounds
+      if (target) m.fitBounds(target, { animate: false })
+    }
+    if (inset) fitInset()
+    else if (bounds) m.fitBounds(bounds)
     else m.setView([0, 0], 2)
 
     let cancelled = false
@@ -117,19 +146,14 @@ export function MapView({ map, markers, position, focus, style, layer, onMarkerC
     baseTiles.current = null
     floorTiles.current = null
     if (!tiles && map.svgPath && bounds) {
-      let p = svgCache.get(map.svgPath)
-      if (!p) {
-        p = fetch(map.svgPath).then((r) => r.text())
-        svgCache.set(map.svgPath, p)
-      }
-      p.then((text) => {
+      loadSvg(map.svgPath).then((text) => {
         if (cancelled) return
         const svg = new DOMParser().parseFromString(text, 'image/svg+xml').documentElement as unknown as SVGElement
         // подложка — в слой тайлов, иначе SVG ляжет поверх маркеров (он грузится позже них)
-        L.svgOverlay(svg, bounds, { className: 'map-svg', pane: 'tilePane' }).addTo(m)
+        L.svgOverlay(svg, svgBoundsOf(map) ?? bounds, { className: 'map-svg', pane: 'tilePane' }).addTo(m)
         svgRef.current = svg
         setBaseReady((n) => n + 1)
-      }).catch(() => svgCache.delete(map.svgPath!))
+      }).catch(() => {})
     } else if (map.tilePath) {
       baseTiles.current = L.tileLayer(map.tilePath, {
         tileSize: map.tileSize ?? 256,
@@ -143,7 +167,10 @@ export function MapView({ map, markers, position, focus, style, layer, onMarkerC
     markerLayer.current = L.layerGroup().addTo(m)
     playerLayer.current = L.layerGroup().addTo(m)
     lmap.current = m
-    const ro = new ResizeObserver(() => m.invalidateSize())
+    const ro = new ResizeObserver(() => {
+      m.invalidateSize()
+      if (inset) fitInset() // у панели размер появляется после вёрстки — подгоняем кадр заново
+    })
     ro.observe(el.current)
     return () => {
       cancelled = true
@@ -151,7 +178,7 @@ export function MapView({ map, markers, position, focus, style, layer, onMarkerC
       m.remove()
       lmap.current = null
     }
-  }, [map, tiles])
+  }, [map, tiles, inset?.rect?.join(',')]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // этаж: показываем его слой поверх основного уровня, основной приглушаем
   useEffect(() => {
@@ -213,7 +240,7 @@ export function MapView({ map, markers, position, focus, style, layer, onMarkerC
         className: `mk-tip${isQuest(mk.kind) ? '' : ' mk-tip-exit'}`,
         direction: 'top',
         offset: TIP_OFFSET[mk.kind],
-        permanent: !isQuest(mk.kind)
+        permanent: !isQuest(mk.kind) && !inset
       })
       if (onMarkerClick) marker.on('click', () => onMarkerClick(mk))
       group.addLayer(marker)
@@ -255,10 +282,10 @@ export function MapView({ map, markers, position, focus, style, layer, onMarkerC
       iconAnchor: [48, 48]
     })
     layer.addLayer(L.marker(here, { icon, interactive: false }))
-    m.panTo(here)
+    if (!inset) m.panTo(here)
   }, [position, map])
 
-  return <div ref={el} className={`map style-${style}${tiles ? ' map-tiles' : ''}`} />
+  return <div ref={el} className={`map style-${style}${tiles ? ' map-tiles' : ''}${inset ? ' map-inset' : ''}`} />
 }
 
 const CONE_SVG = `<svg viewBox="0 0 96 96" width="96" height="96">

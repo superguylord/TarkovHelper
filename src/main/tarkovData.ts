@@ -13,6 +13,7 @@ import type {
   TraderInfo
 } from '@shared/types'
 import { readJson, writeJson } from './store'
+import { httpFetch } from './http'
 
 // Данные берём с tarkov.dev: статические выгрузки json.tarkov.dev (их же использует сайт;
 // GraphQL API бывает недоступен) и maps.json из их репозитория (геометрия карт).
@@ -34,7 +35,7 @@ const geoName = (normalizedName: string) => GEO_ALIAS[normalizedName] ?? normali
 type Dict = Record<string, string>
 
 async function getJson(url: string): Promise<any> {
-  const res = await fetch(url)
+  const res = await httpFetch(url)
   if (!res.ok) throw new Error(`${url}: HTTP ${res.status}`)
   return res.json()
 }
@@ -80,6 +81,111 @@ const LAYER_NAMES: Dict = {
   'Storage/Security': 'Склад / охрана'
 }
 
+// названия зданий в зонах этажей (maps.json, английские метки авторов карт)
+const AREA_NAMES: Dict = {
+  dorms: 'Общага',
+  mechanic: 'Бытовки механика',
+  'switch 2nd': 'Рубильник',
+  'scav checkpoint': 'КПП диких',
+  'dead scav warehouse': 'Склад с мёртвым диким',
+  'pump 2nd': 'Насосная',
+  'big red 2nd': 'Большой красный',
+  skeleton: 'Скелет',
+  'switch snipe': 'Рубильник (снайпер)',
+  'USEC 2nd': 'Лагерь USEC',
+  'construction 2nd': 'Стройка',
+  'chemical warehouse sniper scav': 'Химсклад',
+  'warehouse 17': 'Склад 17',
+  boiler: 'Котельная',
+  'oilrig & panda': 'Нефтянка',
+  'zb-1011': 'ЗБ-1011',
+  'zb-1012': 'ЗБ-1012',
+  'zb-013': 'ЗБ-013',
+  'old gas': 'Старая заправка',
+  'switch basement': 'Подвал рубильника',
+  'boiler room': 'Котельная (подвал)',
+  'm showroom': 'Шоурум',
+  garage: 'Гараж',
+  underpass: 'Подземный переход',
+  mall: 'ТЦ ULTRA',
+  'west wing': 'Западное крыло',
+  admin: 'Админ. корпус',
+  dome: 'Купол',
+  pawns: 'Пешки',
+  'checkpoint fence tower': 'Вышка КПП',
+  'black bishop': 'Чёрный слон',
+  'white bishop': 'Белый слон',
+  'white king': 'Белый король',
+  knights: 'Кони',
+  'train depot': 'Депо',
+  towers: 'Вышки',
+  'scav lands': 'Земли диких',
+  'storage bunker': 'Складской бункер',
+  'command bunkers': 'Командный бункер',
+  D2: 'Д2',
+  'dome tunnels': 'Тоннели купола',
+  'bunker hermetic door bunkers': 'Гермодверь',
+  'E1 bunkers': 'Е1',
+  bunkers: 'Бункеры'
+}
+const areaName = (raw: string | undefined) =>
+  raw ? (AREA_NAMES[raw] ?? raw.charAt(0).toUpperCase() + raw.slice(1)) : ''
+
+// подписи районов: названия брендов оставляем, общие слова переводим
+const LABEL_NAMES: Dict = {
+  Resort: 'Санаторий',
+  'West Wing': 'Западное крыло',
+  'East Wing': 'Восточное крыло',
+  Admin: 'Админ. корпус',
+  'Power Station': 'Электростанция',
+  'Gas Station': 'Заправка',
+  'Weather Station': 'Метеостанция',
+  'Radio Tower': 'Радиовышка',
+  Swamp: 'Болото',
+  Village: 'Деревня',
+  Cabins: 'Домики',
+  Cottages: 'Коттеджи',
+  Pier: 'Пирс',
+  'Bus Stop': 'Остановка',
+  Construction: 'Стройка',
+  Bunker: 'Бункер',
+  Crane: 'Кран',
+  Cinema: 'Кинотеатр',
+  'Post Office': 'Почта',
+  'Office Building': 'Офисное здание',
+  'Main Office': 'Главный офис',
+  'Locker Rooms': 'Раздевалки',
+  Servers: 'Серверная',
+  'Med Tent': 'Медпалатка',
+  Silos: 'Силосы',
+  Boilers: 'Котлы',
+  'Pumping Station': 'Насосная',
+  'Glass Hall': 'Стеклянный цех',
+  'Science Office': 'Научный офис',
+  Dorms: 'Общага',
+  'Big Red': 'Большой красный',
+  Fortress: 'Крепость',
+  Crackhouse: 'Наркопритон',
+  'Old Gas': 'Старая заправка',
+  'New Gas': 'Новая заправка',
+  'Warehouse 17': 'Склад 17',
+  'Warehouse 4': 'Склад 4',
+  'Warehouse 3': 'Склад 3',
+  'Warehouse 7': 'Склад 7',
+  'Repair Shop': 'Ремонтная мастерская',
+  'Trailer Park': 'Трейлерный парк',
+  'Sniper Hill': 'Снайперский холм',
+  'Main Bridge': 'Главный мост',
+  'Junk Bridge': 'Мусорный мост',
+  Skeleton: 'Скелет',
+  Storage: 'Склад',
+  Depot: 'Депо',
+  'Military Checkpoint': 'Военный КПП',
+  'Powerline Tower': 'Опора ЛЭП',
+  'Bus Station': 'Автостанция'
+}
+const labelName = (t: string) => LABEL_NAMES[t] ?? t
+
 function toLayer(l: any): MapLayer {
   return {
     name: LAYER_NAMES[l.name] ?? l.name,
@@ -87,7 +193,10 @@ function toLayer(l: any): MapLayer {
     tilePath: l.tilePath,
     extents: (l.extents ?? []).map((e: any) => ({
       height: [Number(e.height?.[0] ?? -1000), Number(e.height?.[1] ?? 1000)] as [number, number],
-      bounds: (e.bounds ?? []).map((b: any) => [b[0][0], b[0][1], b[1][0], b[1][1]] as [number, number, number, number])
+      areas: (e.bounds ?? []).map((b: any) => ({
+        name: areaName(b[2]),
+        rect: [b[0][0], b[0][1], b[1][0], b[1][1]] as [number, number, number, number]
+      }))
     }))
   }
 }
@@ -142,6 +251,7 @@ function buildMaps(
       svgPath: g.svgPath,
       svgLayer: g.svgLayer,
       layers: (g.layers ?? []).map(toLayer),
+      labels: (g.labels ?? []).map((l: any) => ({ x: l.position[0], z: l.position[1], text: labelName(l.text) })),
       tilePath: g.tilePath,
       tileSize: g.tileSize,
       minZoom: g.minZoom,
@@ -149,6 +259,7 @@ function buildMaps(
       transform: g.transform ?? [1, 0, 1, 0],
       coordinateRotation: g.coordinateRotation ?? 0,
       bounds: g.bounds ?? [],
+      svgBounds: g.svgBounds,
       extracts
     })
   }
@@ -354,7 +465,7 @@ function itemsUsedInTasks(tasks: any[]): Map<string, string[]> {
 // версия в имени: при смене формата данных старый кэш просто не читается
 const cacheName = (mode: GameMode) => `gamedata-v${CACHE_VERSION}-${mode}.json`
 
-const CACHE_VERSION = 6
+const CACHE_VERSION = 9
 
 export function loadCached(mode: GameMode): GameData | null {
   for (let v = CACHE_VERSION; v >= 2; v--) {
@@ -364,15 +475,26 @@ export function loadCached(mode: GameMode): GameData | null {
   return null
 }
 
-/** Старый кэш без новых полей: дополняем пустыми, а fetchedAt = 0 — чтобы данные сразу обновились. */
+/** Старый кэш без новых полей: дополняем пустыми и помечаем, что данные надо обновить. */
 function normalize(d: GameData, old: boolean): GameData {
   if (!old) return d
   return {
     ...d,
-    fetchedAt: 0,
+    outdated: true,
     traders: d.traders ?? [],
     hideout: d.hideout ?? [],
-    maps: d.maps.map((m) => ({ ...m, layers: m.layers ?? [] })),
+    // до версии 7 зоны этажей были просто прямоугольниками (bounds) без названий
+    maps: d.maps.map((m) => ({
+      ...m,
+      labels: m.labels ?? [],
+      layers: (m.layers ?? []).map((l: any) => ({
+        ...l,
+        extents: (l.extents ?? []).map((e: any) => ({
+          height: e.height,
+          areas: e.areas ?? (e.bounds ?? []).map((rect: [number, number, number, number]) => ({ name: '', rect }))
+        }))
+      }))
+    })),
     items: d.items.map((i) => ({ ...i, sellTo: i.sellTo ?? [], buyFrom: i.buyFrom ?? [] })),
     tasks: d.tasks.map((t) => ({
       ...t,
@@ -448,6 +570,7 @@ export async function fetchGameData(
   }
   const complete = !!mapsV && tasksOk && itemsOk
   data.fetchedAt = complete ? Date.now() : (same?.fetchedAt ?? 0)
+  if (!complete) data.outdated = true // часть не загрузилась — при следующей проверке пробуем снова
   writeJson(cacheName(mode), data)
   return { data, complete }
 }

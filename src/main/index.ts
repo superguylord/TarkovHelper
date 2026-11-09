@@ -61,7 +61,7 @@ async function loadData(force = false): Promise<void> {
       resolveMap()
     }
   }
-  const stale = !data || Date.now() - data.fetchedAt > 60 * 60 * 1000
+  const stale = !data || !!data.outdated || Date.now() - data.fetchedAt > 60 * 60 * 1000
   if ((!stale && !force) || loading) return
   loading = true
   live.dataStatus = 'Обновляю данные с tarkov.dev…'

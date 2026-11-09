@@ -4,7 +4,18 @@ import { MapView, type MapMarker } from '../components/MapView'
 import { QuestPage } from './QuestPage'
 import { buildMarkers, loadFaction, questsOnMap, type Faction } from '../mapMarkers'
 import type { Nav } from '../MainApp'
-import { MAP_STYLES, availableLayers, layerOfPoint } from '../mapLayers'
+import { MAP_STYLES, availableLayers, layerOfPoint, usesTiles } from '../mapLayers'
+import { detectAreas } from '../floorAreas'
+import type { MapArea } from '@shared/types'
+import { FloorGallery, floorGroups, type FloorPanel } from '../components/FloorGallery'
+
+function loadSpread(): boolean {
+  try {
+    return localStorage.getItem('floorsSpread') !== 'switch'
+  } catch {
+    return true
+  }
+}
 
 export function MapPage({ s, nav }: { s: AppState; nav: Nav }) {
   const { data, live, progress } = s
@@ -14,6 +25,8 @@ export function MapPage({ s, nav }: { s: AppState; nav: Nav }) {
   const [taskId, setTaskId] = useState<string | null>(null) // квест, подсвеченный на карте
   const [pageTaskId, setPageTaskId] = useState<string | null>(null) // квест, открытый на отдельной странице
   const [floor, setFloor] = useState<string | null>(null) // этаж; null — основной уровень
+  const [spread, setSpread] = useState(loadSpread) // этажи зданий раскладкой рядом с картой
+  const [panel, setPanel] = useState<FloorPanel | null>(null) // выбранная панель раскладки
   const style = s.settings?.mapStyle ?? 'classic'
 
   // как только игра загрузила локацию — переключаемся на неё
@@ -64,10 +77,40 @@ export function MapPage({ s, nav }: { s: AppState; nav: Nav }) {
     [data, map, progress, opts, faction, taskId]
   )
   // приближаем к точкам выбранного квеста
-  const focus = useMemo(
-    () => (task && map ? task.objectives.flatMap((o) => o.points.filter((p) => p.map === map.normalizedName)) : null),
-    [task, map]
-  )
+  // здания для этажей «на всю карту» находим по рисунку (только у векторной схемы)
+  const [detected, setDetected] = useState<Record<string, MapArea[]>>({})
+  useEffect(() => {
+    setDetected({})
+    if (!map || usesTiles(map, style)) return
+    let alive = true
+    const whole = availableLayers(map, style).filter((l) => l.extents.some((e) => !e.areas.length))
+    Promise.all(whole.map((l) => detectAreas(map, l).then((a) => [l.name, a] as const))).then(
+      (entries) => alive && setDetected(Object.fromEntries(entries))
+    )
+    return () => {
+      alive = false
+    }
+  }, [map, style])
+  const groups = useMemo(() => (map ? floorGroups(map, style, detected) : []), [map, style, detected])
+  useEffect(() => setPanel(null), [map?.normalizedName, style])
+  useEffect(() => {
+    try {
+      localStorage.setItem('floorsSpread', spread ? 'spread' : 'switch')
+    } catch {
+      /* без сохранения — не страшно */
+    }
+  }, [spread])
+
+  // приближаем к точкам выбранного квеста или к зданию, выбранному в раскладке
+  const focus = useMemo(() => {
+    if (task && map) return task.objectives.flatMap((o) => o.points.filter((p) => p.map === map.normalizedName))
+    const r = panel?.rect
+    return r ? [{ x: r[0], y: 0, z: r[1] }, { x: r[2], y: 0, z: r[3] }] : null
+  }, [task, map, panel])
+  const selectPanel = useCallback((p: FloorPanel) => {
+    setPanel(p)
+    setFloor(p.layer.name)
+  }, [])
   const onMarkerClick = useCallback((mk: MapMarker) => mk.taskId && setTaskId(mk.taskId), [])
 
   if (!data || !map) return <div className="empty">Данные карт ещё не загружены. {live?.dataStatus}</div>
@@ -166,6 +209,19 @@ export function MapPage({ s, nav }: { s: AppState; nav: Nav }) {
         {style === 'detailed' && !map.tilePath && (
           <p className="muted small">Для этой карты подробной подложки нет — показана схема.</p>
         )}
+        {groups.length > 0 && (
+          <>
+            <div className="eyebrow">Этажи зданий</div>
+            <div className="seg seg-small">
+              <button className={spread ? 'active' : ''} onClick={() => setSpread(true)}>
+                Раскладкой
+              </button>
+              <button className={!spread ? 'active' : ''} onClick={() => setSpread(false)}>
+                Переключателем
+              </button>
+            </div>
+          </>
+        )}
 
         <div className="eyebrow">Позиция</div>
         <p className="muted small">
@@ -175,7 +231,18 @@ export function MapPage({ s, nav }: { s: AppState; nav: Nav }) {
         </p>
       </aside>
 
-      <div className="map-wrap">
+      <div className={spread && groups.length ? 'map-wrap map-wrap-spread' : 'map-wrap'}>
+        {spread && groups.length > 0 && (
+          <FloorGallery
+            map={map}
+            style={style}
+            groups={groups}
+            markers={markers}
+            position={pos}
+            active={panel?.key ?? null}
+            onSelect={selectPanel}
+          />
+        )}
         <MapView
           map={map}
           markers={markers}
@@ -188,7 +255,13 @@ export function MapPage({ s, nav }: { s: AppState; nav: Nav }) {
         {floors.length > 0 && (
           <div className="floors">
             <div className="floors-title">Этаж</div>
-            <button className={floor === null ? 'active' : ''} onClick={() => setFloor(null)}>
+            <button
+              className={floor === null ? 'active' : ''}
+              onClick={() => {
+                setFloor(null)
+                setPanel(null)
+              }}
+            >
               Основной
             </button>
             {floors.map((l) => (

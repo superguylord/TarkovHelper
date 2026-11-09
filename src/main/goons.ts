@@ -1,4 +1,5 @@
 import type { GoonReport, GoonsState } from '@shared/types'
+import { httpFetch } from './http'
 
 // Где сейчас Кочевники (Отступники): доклады игроков с главной страницы tarkov.help.
 // Отдельного API нет — данные лежат в странице в виде JSON внутри скрипта Next.js.
@@ -37,7 +38,7 @@ function moscowTime(hhmm: string, now: number): number | null {
 }
 
 export async function fetchGoons(resolveMap: (key: string, name: string) => string | null): Promise<GoonsState> {
-  const res = await fetch(PAGE, { headers: { 'User-Agent': 'Mozilla/5.0 TarkovHelper' } })
+  const res = await httpFetch(PAGE, { headers: { 'User-Agent': 'Mozilla/5.0 TarkovHelper' } })
   if (!res.ok) throw new Error(`tarkov.help: HTTP ${res.status}`)
   const goons = extractGoons(await res.text())
   if (!goons) throw new Error('tarkov.help: блок с Кочевниками не найден')

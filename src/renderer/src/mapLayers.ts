@@ -2,6 +2,7 @@ import type { MapInfo, MapLayer, MapStyle, Point3 } from '@shared/types'
 
 export const MAP_STYLES: [MapStyle, string][] = [
   ['classic', 'Классика'],
+  ['scheme', 'Схема'],
   ['khaki', 'Хаки'],
   ['night', 'Тёмная'],
   ['detailed', 'Подробная']
@@ -22,8 +23,9 @@ export function layerOfPoint(layers: MapLayer[], p: Point3): string | null {
   for (const layer of layers) {
     for (const e of layer.extents) {
       if (p.y < e.height[0] || p.y > e.height[1]) continue
-      if (!e.bounds.length) return layer.name
-      for (const [x1, z1, x2, z2] of e.bounds) {
+      if (!e.areas.length) return layer.name
+      for (const { rect } of e.areas) {
+        const [x1, z1, x2, z2] = rect
         if (p.x >= Math.min(x1, x2) && p.x <= Math.max(x1, x2) && p.z >= Math.min(z1, z2) && p.z <= Math.max(z1, z2)) {
           return layer.name
         }
