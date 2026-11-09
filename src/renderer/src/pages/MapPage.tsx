@@ -4,6 +4,7 @@ import { MapView, type MapMarker } from '../components/MapView'
 import { QuestPage } from './QuestPage'
 import { buildMarkers, loadFaction, questsOnMap, type Faction } from '../mapMarkers'
 import type { Nav } from '../MainApp'
+import { MAP_STYLES, availableLayers, layerOfPoint } from '../mapLayers'
 
 export function MapPage({ s, nav }: { s: AppState; nav: Nav }) {
   const { data, live, progress } = s
@@ -12,6 +13,8 @@ export function MapPage({ s, nav }: { s: AppState; nav: Nav }) {
   const [faction, setFaction] = useState<Faction>(loadFaction)
   const [taskId, setTaskId] = useState<string | null>(null) // квест, подсвеченный на карте
   const [pageTaskId, setPageTaskId] = useState<string | null>(null) // квест, открытый на отдельной странице
+  const [floor, setFloor] = useState<string | null>(null) // этаж; null — основной уровень
+  const style = s.settings?.mapStyle ?? 'classic'
 
   // как только игра загрузила локацию — переключаемся на неё
   useEffect(() => {
@@ -37,6 +40,20 @@ export function MapPage({ s, nav }: { s: AppState; nav: Nav }) {
   }, [faction])
 
   const map = data?.maps.find((m) => m.normalizedName === selected) ?? data?.maps[0]
+  const floors = useMemo(() => (map ? availableLayers(map, style) : []), [map, style])
+
+  // новая карта или стиль без такого этажа — возвращаемся на основной уровень
+  useEffect(() => {
+    if (floor && !floors.some((l) => l.name === floor)) setFloor(null)
+  }, [floors, floor])
+  useEffect(() => setFloor(null), [map?.normalizedName])
+
+  // после скриншота переключаемся на этаж, где стоит игрок
+  const position = live?.position ?? null
+  useEffect(() => {
+    if (position && map && (position.map === map.normalizedName || !position.map)) setFloor(layerOfPoint(floors, position))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [position?.at, map, floors]) // только при новом скриншоте, чтобы не сбивать выбранный вручную этаж
   const quests = useMemo(
     () => (data && map ? questsOnMap(data, map, progress) : []),
     [data, map, progress]
@@ -138,6 +155,18 @@ export function MapPage({ s, nav }: { s: AppState; nav: Nav }) {
           </button>
         </div>
 
+        <div className="eyebrow">Вид карты</div>
+        <div className="seg seg-small seg-wrap">
+          {MAP_STYLES.map(([key, label]) => (
+            <button key={key} className={style === key ? 'active' : ''} onClick={() => window.api.setSettings({ mapStyle: key })}>
+              {label}
+            </button>
+          ))}
+        </div>
+        {style === 'detailed' && !map.tilePath && (
+          <p className="muted small">Для этой карты подробной подложки нет — показана схема.</p>
+        )}
+
         <div className="eyebrow">Позиция</div>
         <p className="muted small">
           {pos
@@ -147,7 +176,28 @@ export function MapPage({ s, nav }: { s: AppState; nav: Nav }) {
       </aside>
 
       <div className="map-wrap">
-        <MapView map={map} markers={markers} position={pos} focus={focus} onMarkerClick={onMarkerClick} />
+        <MapView
+          map={map}
+          markers={markers}
+          position={pos}
+          focus={focus}
+          style={style}
+          layer={floor}
+          onMarkerClick={onMarkerClick}
+        />
+        {floors.length > 0 && (
+          <div className="floors">
+            <div className="floors-title">Этаж</div>
+            <button className={floor === null ? 'active' : ''} onClick={() => setFloor(null)}>
+              Основной
+            </button>
+            {floors.map((l) => (
+              <button key={l.name} className={floor === l.name ? 'active' : ''} onClick={() => setFloor(l.name)}>
+                {l.name}
+              </button>
+            ))}
+          </div>
+        )}
         {task && (
           <div className="quest-chip">
             <span className="quest-chip-name">{task.name}</span>

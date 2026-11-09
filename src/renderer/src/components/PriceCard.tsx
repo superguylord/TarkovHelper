@@ -1,14 +1,17 @@
-import type { GameData, Item } from '@shared/types'
+import type { GameData, Item, Progress } from '@shared/types'
+import { hideoutNeeds } from '../hideoutLogic'
 import { rub } from '../questLogic'
 
 /** Карточка предмета: цены на барахолке и у торговца, нужен ли для квестов. */
-export function PriceCard({ item, data }: { item: Item; data: GameData }) {
+export function PriceCard({ item, data, progress }: { item: Item; data: GameData; progress?: Progress }) {
   const slots = item.width * item.height
   const best = Math.max(item.avg24hPrice ?? 0, item.bestTrader?.price ?? 0)
   const tasks = item.usedInTasks
     .map((id) => data.tasks.find((t) => t.id === id)?.name)
     .filter(Boolean) as string[]
   const fleaBetter = (item.avg24hPrice ?? 0) > (item.bestTrader?.price ?? 0)
+  // для убежища — только уровни, которые ещё не построены
+  const hideout = progress ? hideoutNeeds(data, progress, 'all').find((n) => n.itemId === item.id) : undefined
   return (
     <div className="price-card">
       <div className="price-head">
@@ -41,6 +44,12 @@ export function PriceCard({ item, data }: { item: Item; data: GameData }) {
       {tasks.length > 0 && (
         <div className="price-tasks">
           <span className="tag tag-brass">Нужен для квестов</span> {tasks.join(', ')}
+        </div>
+      )}
+      {hideout && (
+        <div className="price-tasks">
+          <span className="tag tag-green-strong">Нужен для убежища ×{hideout.count}</span>{' '}
+          {hideout.uses.map((u) => `${u.station} ур. ${u.level}`).join(', ')}
         </div>
       )}
     </div>

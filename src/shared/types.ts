@@ -26,7 +26,7 @@ export interface MapInfo {
   nameIds: string[] // идентификаторы локации из логов игры (bigmap, factory4_day...)
   svgPath?: string
   svgLayer?: string // слой основного уровня внутри SVG
-  hiddenSvgLayers: string[] // слои других этажей — скрываем, чтобы не накладывались
+  layers: MapLayer[] // этажи и подземные уровни
   tilePath?: string
   tileSize?: number
   minZoom?: number
@@ -35,6 +35,15 @@ export interface MapInfo {
   coordinateRotation: number
   bounds: number[][]
   extracts: Extract[]
+}
+
+/** Этаж карты: свой слой в SVG и/или свои тайлы, плюс зоны, где он «включается» по высоте. */
+export interface MapLayer {
+  name: string
+  svgLayer?: string
+  tilePath?: string
+  // по высоте y и прямоугольникам [x1, z1, x2, z2] определяем, на каком этаже точка
+  extents: { height: [number, number]; bounds: [number, number, number, number][] }[]
 }
 
 export interface TaskObjective {
@@ -104,6 +113,21 @@ export interface TraderInfo {
   resetTime: string | null // когда обновится ассортимент (ISO)
 }
 
+export interface HideoutLevel {
+  level: number
+  constructionTime: number // секунды
+  items: { itemId: string; name: string; count: number; fir: boolean }[]
+  stations: { stationId: string; name: string; level: number }[]
+  traders: { name: string; level: number }[]
+  skills: { name: string; level: number }[]
+}
+
+export interface HideoutStation {
+  id: string
+  name: string
+  levels: HideoutLevel[]
+}
+
 export interface GameData {
   fetchedAt: number
   gameMode: GameMode
@@ -111,6 +135,7 @@ export interface GameData {
   maps: MapInfo[]
   tasks: Task[]
   items: Item[]
+  hideout: HideoutStation[]
 }
 
 export type TaskStatus = 'active' | 'completed' | 'failed'
@@ -119,6 +144,7 @@ export interface Progress {
   playerLevel: number
   tasks: Record<string, TaskStatus>
   objectives: Record<string, boolean> // цели, отмеченные выполненными вручную
+  hideout: Record<string, number> // построенный уровень модуля убежища
 }
 
 export interface Hotkeys {
@@ -126,7 +152,10 @@ export interface Hotkeys {
   price: string // цена предмета под курсором
 }
 
+export type MapStyle = 'classic' | 'khaki' | 'night' | 'detailed'
+
 export interface Settings {
+  mapStyle: MapStyle
   gamePath: string
   screenshotsPath: string
   gameMode: 'auto' | GameMode
@@ -177,6 +206,15 @@ export interface GoonsState {
   error: string | null
 }
 
+/** Состояние автообновления. */
+export interface UpdateState {
+  status: 'dev' | 'idle' | 'checking' | 'none' | 'downloading' | 'ready' | 'error'
+  current: string // установленная версия
+  version?: string // новая версия
+  percent?: number
+  error?: string
+}
+
 export type OverlayMode = 'hidden' | 'full'
 
 export interface Api {
@@ -188,8 +226,12 @@ export interface Api {
   setTaskStatus(taskId: string, status: TaskStatus | null): Promise<Progress>
   setPlayerLevel(level: number): Promise<Progress>
   setObjectiveDone(objectiveId: string, done: boolean): Promise<Progress>
+  setHideoutLevel(stationId: string, level: number): Promise<Progress>
   getGuide(taskName: string): Promise<QuestGuide | null>
   getGoons(): Promise<GoonsState>
+  getUpdate(): Promise<UpdateState>
+  checkUpdate(): Promise<void>
+  installUpdate(): Promise<void>
   importFromLogs(): Promise<number>
   getLive(): Promise<LiveState>
   setCurrentMap(map: string | null): Promise<void>
@@ -198,7 +240,7 @@ export interface Api {
   setOverlayMode(mode: OverlayMode): Promise<void>
   pickFolder(): Promise<string | null>
   on(
-    channel: 'data' | 'live' | 'progress' | 'price' | 'overlay-mode' | 'settings' | 'goons',
+    channel: 'data' | 'live' | 'progress' | 'price' | 'overlay-mode' | 'settings' | 'goons' | 'update',
     cb: (payload: any) => void
   ): () => void
 }

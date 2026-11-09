@@ -6,6 +6,16 @@ const HOTKEY_LABELS: [keyof Hotkeys, string][] = [
   ['price', 'Цена предмета под курсором']
 ]
 
+const UPDATE_TEXT: Record<string, string> = {
+  dev: 'режим разработки, обновления отключены',
+  idle: 'проверка обновлений скоро начнётся',
+  checking: 'проверяю обновления…',
+  none: 'установлена последняя версия',
+  downloading: 'загружается обновление',
+  ready: 'обновление скачано',
+  error: 'не удалось проверить обновления'
+}
+
 export function SettingsPage({ s }: { s: AppState }) {
   const { settings, live, data } = s
   if (!settings) return null
@@ -67,6 +77,26 @@ export function SettingsPage({ s }: { s: AppState }) {
             />
           </label>
         ))}
+      </section>
+
+      <section className="panel">
+        <div className="eyebrow">Версия</div>
+        <p className="small">
+          TarkovHelper {s.update?.current ?? '—'} · {UPDATE_TEXT[s.update?.status ?? 'idle']}
+          {s.update?.status === 'downloading' ? ` (${s.update.version}, ${s.update.percent ?? 0}%)` : ''}
+          {s.update?.status === 'ready' ? ` — версия ${s.update.version}` : ''}
+        </p>
+        {s.update?.status === 'error' && <p className="small muted">Ошибка: {s.update.error}</p>}
+        <div className="row-buttons">
+          <button className="btn" onClick={() => window.api.checkUpdate()} disabled={s.update?.status === 'dev'}>
+            Проверить обновления
+          </button>
+          {s.update?.status === 'ready' && (
+            <button className="btn btn-brass" onClick={() => window.api.installUpdate()}>
+              Перезапустить и обновить
+            </button>
+          )}
+        </div>
       </section>
 
       <section className="panel">

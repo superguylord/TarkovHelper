@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import type { GameData, GoonsState, LiveState, OverlayMode, PriceResult, Progress, Settings } from '@shared/types'
+import type { GameData, GoonsState, LiveState, OverlayMode, PriceResult, Progress, Settings, UpdateState } from '@shared/types'
 
 export interface AppState {
   data: GameData | null
@@ -9,6 +9,7 @@ export interface AppState {
   price: PriceResult | null
   overlayMode: OverlayMode
   goons: GoonsState | null
+  update: UpdateState | null
 }
 
 /** Состояние приложения из main-процесса с подпиской на обновления. */
@@ -16,18 +17,19 @@ export function useAppState(): AppState {
   const [s, setS] = useState<AppState>({
     data: null,
     live: null,
-    progress: { playerLevel: 1, tasks: {}, objectives: {} },
+    progress: { playerLevel: 1, tasks: {}, objectives: {}, hideout: {} },
     settings: null,
     price: null,
     overlayMode: 'hidden',
-    goons: null
+    goons: null,
+    update: null
   })
 
   useEffect(() => {
     const api = window.api
     const set = (patch: Partial<AppState>) => setS((prev) => ({ ...prev, ...patch }))
-    Promise.all([api.getData(), api.getLive(), api.getProgress(), api.getSettings(), api.getGoons()]).then(
-      ([data, live, progress, settings, goons]) => set({ data, live, progress, settings, goons })
+    Promise.all([api.getData(), api.getLive(), api.getProgress(), api.getSettings(), api.getGoons(), api.getUpdate()]).then(
+      ([data, live, progress, settings, goons, update]) => set({ data, live, progress, settings, goons, update })
     )
     const offs = [
       api.on('data', (data) => set({ data })),
@@ -36,7 +38,8 @@ export function useAppState(): AppState {
       api.on('settings', (settings) => set({ settings })),
       api.on('price', (price) => set({ price })),
       api.on('overlay-mode', (overlayMode) => set({ overlayMode })),
-      api.on('goons', (goons) => set({ goons }))
+      api.on('goons', (goons) => set({ goons })),
+      api.on('update', (update) => set({ update }))
     ]
     return () => offs.forEach((off) => off())
   }, [])

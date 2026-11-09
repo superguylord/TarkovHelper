@@ -1,4 +1,17 @@
-import type { BringItem, Extract, GameData, GameMode, Item, MapInfo, MapPoint, Task, TraderInfo } from '@shared/types'
+import type {
+  BringItem,
+  Extract,
+  GameData,
+  GameMode,
+  HideoutLevel,
+  HideoutStation,
+  Item,
+  MapInfo,
+  MapLayer,
+  MapPoint,
+  Task,
+  TraderInfo
+} from '@shared/types'
 import { readJson, writeJson } from './store'
 
 // Данные берём с tarkov.dev: статические выгрузки json.tarkov.dev (их же использует сайт;
@@ -36,6 +49,48 @@ async function getDump(mode: GameMode, name: string): Promise<{ data: any; ru: D
 }
 
 const tr = (ru: Dict, key: string | undefined) => (key ? (ru[key] ?? key) : '')
+
+// названия этажей в maps.json английские
+const LAYER_NAMES: Dict = {
+  '2nd Floor': '2 этаж',
+  '3rd Floor': '3 этаж',
+  '4th Floor': '4 этаж',
+  '5th Floor': '5 этаж',
+  Underground: 'Подземный уровень',
+  Garage: 'Гараж',
+  Tunnels: 'Тоннели',
+  Bunkers: 'Бункеры',
+  'Second Level': '2 уровень',
+  Technical: 'Технический уровень',
+  Infirmary: 'Медблок',
+  Helipad: 'Вертолётная площадка',
+  'Gym/Canteen': 'Спортзал / столовая',
+  'Accommodation (lower)': 'Жилой блок (низ)',
+  'Accommodation (mid)': 'Жилой блок (середина)',
+  'Accommodation (upper)': 'Жилой блок (верх)',
+  "Officers' Deck": 'Офицерская палуба',
+  'Stairs (blocked)': 'Лестница (закрыта)',
+  Bridge: 'Мостик',
+  'Bridge Roof': 'Крыша мостика',
+  'Control Room': 'Пункт управления',
+  'Engine Room': 'Машинное отделение',
+  'Engine Room (upper)': 'Машинное отделение (верх)',
+  'Fuel Pumps (lower)': 'Топливные насосы (низ)',
+  'Fuel Pumps': 'Топливные насосы',
+  'Storage/Security': 'Склад / охрана'
+}
+
+function toLayer(l: any): MapLayer {
+  return {
+    name: LAYER_NAMES[l.name] ?? l.name,
+    svgLayer: l.svgLayer,
+    tilePath: l.tilePath,
+    extents: (l.extents ?? []).map((e: any) => ({
+      height: [Number(e.height?.[0] ?? -1000), Number(e.height?.[1] ?? 1000)] as [number, number],
+      bounds: (e.bounds ?? []).map((b: any) => [b[0][0], b[0][1], b[1][0], b[1][1]] as [number, number, number, number])
+    }))
+  }
+}
 
 async function fetchMapsRaw(mode: GameMode): Promise<{ geo: any[]; data: any; ru: Dict }> {
   const [geo, dump] = await Promise.all([getJson(MAPS_JSON), getDump(mode, 'maps')])
@@ -86,7 +141,7 @@ function buildMaps(
       nameIds: variants.map((m) => String(m.nameId).toLowerCase()),
       svgPath: g.svgPath,
       svgLayer: g.svgLayer,
-      hiddenSvgLayers: (g.layers ?? []).map((l: any) => l.svgLayer).filter(Boolean),
+      layers: (g.layers ?? []).map(toLayer),
       tilePath: g.tilePath,
       tileSize: g.tileSize,
       minZoom: g.minZoom,
@@ -247,6 +302,38 @@ function toItem(i: any, ru: Dict, traders: Dict, usedIn: Map<string, string[]>, 
   }
 }
 
+/** Модули убежища с уровнями и требованиями. */
+function buildHideout({ data, ru }: { data: any; ru: Dict }, traders: Dict, itemName: (id: string) => string): HideoutStation[] {
+  const stations = Object.values<any>(data)
+  const stationName: Dict = {}
+  for (const s of stations) stationName[s.id] = tr(ru, s.name)
+  return stations
+    .map((s) => ({
+      id: s.id,
+      name: stationName[s.id],
+      levels: (s.levels ?? [])
+        .map((l: any) => ({
+          level: l.level,
+          constructionTime: l.constructionTime ?? 0,
+          items: (l.itemRequirements ?? []).map((r: any) => ({
+            itemId: r.item,
+            name: itemName(r.item),
+            count: r.count,
+            fir: !!r.attributes?.foundInRaid
+          })),
+          stations: (l.stationLevelRequirements ?? []).map((r: any) => ({
+            stationId: r.station,
+            name: stationName[r.station] ?? r.station,
+            level: r.level
+          })),
+          traders: (l.traderRequirements ?? []).map((r: any) => ({ name: traders[r.trader] ?? r.trader, level: r.value ?? r.level })),
+          skills: (l.skillRequirements ?? []).map((r: any) => ({ name: tr(ru, r.skill), level: r.level }))
+        }))
+        .sort((a: HideoutLevel, b: HideoutLevel) => a.level - b.level)
+    }))
+    .sort((a, b) => a.name.localeCompare(b.name, 'ru'))
+}
+
 /** Какие квесты требуют предмет. Объективы вида «любой из 50 предметов» пропускаем — это шум. */
 function itemsUsedInTasks(tasks: any[]): Map<string, string[]> {
   const used = new Map<string, string[]>()
@@ -265,11 +352,34 @@ function itemsUsedInTasks(tasks: any[]): Map<string, string[]> {
 }
 
 // версия в имени: при смене формата данных старый кэш просто не читается
-const cacheName = (mode: GameMode) => `gamedata-v4-${mode}.json`
+const cacheName = (mode: GameMode) => `gamedata-v${CACHE_VERSION}-${mode}.json`
+
+const CACHE_VERSION = 6
 
 export function loadCached(mode: GameMode): GameData | null {
-  const d = readJson<GameData | null>(cacheName(mode), null)
-  return d && d.tasks ? d : null
+  for (let v = CACHE_VERSION; v >= 2; v--) {
+    const d = readJson<GameData | null>(`gamedata-v${v}-${mode}.json`, null)
+    if (d && d.tasks) return normalize(d, v < CACHE_VERSION)
+  }
+  return null
+}
+
+/** Старый кэш без новых полей: дополняем пустыми, а fetchedAt = 0 — чтобы данные сразу обновились. */
+function normalize(d: GameData, old: boolean): GameData {
+  if (!old) return d
+  return {
+    ...d,
+    fetchedAt: 0,
+    traders: d.traders ?? [],
+    hideout: d.hideout ?? [],
+    maps: d.maps.map((m) => ({ ...m, layers: m.layers ?? [] })),
+    items: d.items.map((i) => ({ ...i, sellTo: i.sellTo ?? [], buyFrom: i.buyFrom ?? [] })),
+    tasks: d.tasks.map((t) => ({
+      ...t,
+      neededKeys: Array.isArray(t.neededKeys) && typeof t.neededKeys[0] !== 'string' ? t.neededKeys : [],
+      objectives: t.objectives.map((o) => ({ ...o, hints: o.hints ?? [], bring: o.bring ?? [] }))
+    }))
+  }
 }
 
 /**
@@ -280,13 +390,14 @@ export async function fetchGameData(
   mode: GameMode,
   prev: GameData | null
 ): Promise<{ data: GameData; complete: boolean }> {
-  const [traders, maps, tasks, items] = await Promise.allSettled([
+  const [traders, maps, tasks, items, hideout] = await Promise.allSettled([
     getDump(mode, 'traders'),
     fetchMapsRaw(mode),
     getDump(mode, 'tasks'),
-    getDump(mode, 'items')
+    getDump(mode, 'items'),
+    getDump(mode, 'hideout')
   ])
-  const results = [traders, maps, tasks, items]
+  const results = [traders, maps, tasks, items, hideout]
   for (const r of results) if (r.status === 'rejected') console.warn(String(r.reason))
   if (results.every((r) => r.status === 'rejected')) throw (maps as PromiseRejectedResult).reason
 
@@ -329,7 +440,11 @@ export async function fetchGameData(
       : (same?.tasks ?? []),
     items: itemsOk
       ? Object.values<any>(itemsV!.data.items).map((i) => toItem(i, itemsV!.ru, traderNames, usedIn, taskNames))
-      : (same?.items ?? [])
+      : (same?.items ?? []),
+    hideout:
+      hideout.status === 'fulfilled' && tradersOk
+        ? buildHideout(hideout.value, traderNames, itemName)
+        : (same?.hideout ?? [])
   }
   const complete = !!mapsV && tasksOk && itemsOk
   data.fetchedAt = complete ? Date.now() : (same?.fetchedAt ?? 0)

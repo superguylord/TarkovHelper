@@ -33,7 +33,7 @@ export function OverlayApp() {
       {showPrice && (
         <div className="price-toast">
           {price.item && data ? (
-            <PriceCard item={price.item} data={data} />
+            <PriceCard item={price.item} data={data} progress={s.progress} />
           ) : (
             <div className="empty">Не удалось распознать предмет</div>
           )}

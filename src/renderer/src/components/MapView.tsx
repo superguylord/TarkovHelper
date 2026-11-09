@@ -1,6 +1,7 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import L from 'leaflet'
-import type { MapInfo, PlayerPosition, Point3 } from '@shared/types'
+import type { MapInfo, MapStyle, PlayerPosition, Point3 } from '@shared/types'
+import { availableLayers, layerOfPoint, usesTiles } from '../mapLayers'
 
 // Проекция карт как на tarkov.dev: игровые координаты (x, z) -> lat/lng с поворотом
 // и линейным преобразованием из maps.json.
@@ -78,16 +79,24 @@ interface Props {
   markers: MapMarker[]
   position: PlayerPosition | null
   focus?: Point3[] | null // показать эти точки целиком (например, выбранный квест)
+  style: MapStyle
+  layer: string | null // активный этаж; null — основной уровень
   onMarkerClick?: (marker: MapMarker) => void
 }
 
 const svgCache = new Map<string, Promise<string>>()
 
-export function MapView({ map, markers, position, focus, onMarkerClick }: Props) {
+export function MapView({ map, markers, position, focus, style, layer, onMarkerClick }: Props) {
   const el = useRef<HTMLDivElement>(null)
   const lmap = useRef<L.Map | null>(null)
   const markerLayer = useRef<L.LayerGroup | null>(null)
   const playerLayer = useRef<L.LayerGroup | null>(null)
+  const svgRef = useRef<SVGElement | null>(null) // векторная подложка (все этажи внутри)
+  const baseTiles = useRef<L.TileLayer | null>(null)
+  const floorTiles = useRef<L.TileLayer | null>(null)
+  const [baseReady, setBaseReady] = useState(0) // SVG грузится асинхронно — после загрузки применяем этаж
+  const tiles = usesTiles(map, style)
+  const layers = availableLayers(map, style)
 
   // создание карты при смене локации
   useEffect(() => {
@@ -104,7 +113,10 @@ export function MapView({ map, markers, position, focus, onMarkerClick }: Props)
     else m.setView([0, 0], 2)
 
     let cancelled = false
-    if (map.svgPath && bounds) {
+    svgRef.current = null
+    baseTiles.current = null
+    floorTiles.current = null
+    if (!tiles && map.svgPath && bounds) {
       let p = svgCache.get(map.svgPath)
       if (!p) {
         p = fetch(map.svgPath).then((r) => r.text())
@@ -113,20 +125,19 @@ export function MapView({ map, markers, position, focus, onMarkerClick }: Props)
       p.then((text) => {
         if (cancelled) return
         const svg = new DOMParser().parseFromString(text, 'image/svg+xml').documentElement as unknown as SVGElement
-        // в одном SVG лежат все этажи — оставляем только основной уровень
-        for (const id of map.hiddenSvgLayers ?? []) {
-          svg.querySelector(`[id="${id}"]`)?.setAttribute('display', 'none')
-        }
         // подложка — в слой тайлов, иначе SVG ляжет поверх маркеров (он грузится позже них)
         L.svgOverlay(svg, bounds, { className: 'map-svg', pane: 'tilePane' }).addTo(m)
+        svgRef.current = svg
+        setBaseReady((n) => n + 1)
       }).catch(() => svgCache.delete(map.svgPath!))
     } else if (map.tilePath) {
-      L.tileLayer(map.tilePath, {
+      baseTiles.current = L.tileLayer(map.tilePath, {
         tileSize: map.tileSize ?? 256,
         bounds,
         maxNativeZoom: map.maxZoom ?? 6,
         maxZoom: (map.maxZoom ?? 6) + 2
       }).addTo(m)
+      setBaseReady((n) => n + 1)
     }
 
     markerLayer.current = L.layerGroup().addTo(m)
@@ -140,42 +151,74 @@ export function MapView({ map, markers, position, focus, onMarkerClick }: Props)
       m.remove()
       lmap.current = null
     }
-  }, [map])
+  }, [map, tiles])
+
+  // этаж: показываем его слой поверх основного уровня, основной приглушаем
+  useEffect(() => {
+    const m = lmap.current
+    if (!m) return
+    const active = layers.find((l) => l.name === layer) ?? null
+    const svg = svgRef.current
+    if (svg) {
+      for (const l of map.layers ?? []) {
+        if (!l.svgLayer) continue
+        svg.querySelector(`[id="${l.svgLayer}"]`)?.setAttribute('display', l === active ? 'inline' : 'none')
+      }
+      if (map.svgLayer) svg.querySelector(`[id="${map.svgLayer}"]`)?.setAttribute('opacity', active ? '0.3' : '1')
+    }
+    floorTiles.current?.remove()
+    floorTiles.current = null
+    baseTiles.current?.setOpacity(active ? 0.35 : 1)
+    if (tiles && active?.tilePath) {
+      floorTiles.current = L.tileLayer(active.tilePath, {
+        tileSize: map.tileSize ?? 256,
+        bounds: mapBounds(map),
+        maxNativeZoom: map.maxZoom ?? 6,
+        maxZoom: (map.maxZoom ?? 6) + 2,
+        zIndex: 2
+      }).addTo(m)
+    }
+  }, [layer, map, tiles, baseReady]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // маркеры квестов и выходов
   useEffect(() => {
-    const layer = markerLayer.current
-    if (!layer) return
-    layer.clearLayers()
+    const group = markerLayer.current
+    if (!group) return
+    group.clearLayers()
     const isQuest = (k: MapMarker['kind']) => k === 'quest' || k === 'quest-selected'
     // выходы под квестами, выбранный квест — поверх всех
     const weight = (k: MapMarker['kind']) => (k === 'quest-selected' ? 2 : isQuest(k) ? 1 : 0)
     const sorted = [...markers].sort((a, b) => weight(a.kind) - weight(b.kind))
     for (const mk of sorted) {
+      // точки с другого этажа приглушаем, но не прячем — видно, что там что-то есть
+      const pointLayer = layerOfPoint(layers, mk.point)
+      const other = pointLayer !== (layers.some((l) => l.name === layer) ? layer : null)
       if (mk.outline) {
-        layer.addLayer(
+        group.addLayer(
           L.polygon(
             mk.outline.map((p) => L.latLng(p.z, p.x)),
-            { className: `zone zone-${mk.kind}`, interactive: false }
+            { className: `zone zone-${mk.kind}${other ? ' zone-dim' : ''}`, interactive: false }
           )
         )
       }
       const marker = L.marker(toLatLng(mk.point), {
         icon: ICONS[mk.kind],
-        zIndexOffset: weight(mk.kind) * 1000,
-        riseOnHover: true
+        zIndexOffset: weight(mk.kind) * 1000 - (other ? 500 : 0),
+        riseOnHover: true,
+        opacity: other ? 0.4 : 1
       })
       const detail = mk.detail ? (isQuest(mk.kind) ? `<br>${escapeHtml(mk.detail)}` : `<br><small>${escapeHtml(mk.detail)}</small>`) : ''
-      marker.bindTooltip(`<b>${escapeHtml(mk.label)}</b>${detail}`, {
+      const floor = pointLayer ? `<br><small>${escapeHtml(pointLayer)}</small>` : ''
+      marker.bindTooltip(`<b>${escapeHtml(mk.label)}</b>${detail}${floor}`, {
         className: `mk-tip${isQuest(mk.kind) ? '' : ' mk-tip-exit'}`,
         direction: 'top',
         offset: TIP_OFFSET[mk.kind],
         permanent: !isQuest(mk.kind)
       })
       if (onMarkerClick) marker.on('click', () => onMarkerClick(mk))
-      layer.addLayer(marker)
+      group.addLayer(marker)
     }
-  }, [markers, map, onMarkerClick])
+  }, [markers, map, layer, tiles, onMarkerClick]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // приблизить к выбранным точкам
   useEffect(() => {
@@ -215,7 +258,7 @@ export function MapView({ map, markers, position, focus, onMarkerClick }: Props)
     m.panTo(here)
   }, [position, map])
 
-  return <div ref={el} className="map" />
+  return <div ref={el} className={`map style-${style}${tiles ? ' map-tiles' : ''}`} />
 }
 
 const CONE_SVG = `<svg viewBox="0 0 96 96" width="96" height="96">

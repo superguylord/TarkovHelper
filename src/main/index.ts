@@ -10,10 +10,12 @@ import { ScreenshotWatcher } from './screenshotWatcher'
 import { matchItems, scanPrice, warmUpOcr } from './priceScanner'
 import { getGuide } from './tarkovHelp'
 import { fetchGoons } from './goons'
+import { initUpdater } from './updater'
 
 // ---------- состояние ----------
 
 const defaultSettings = (): Settings => ({
+  mapStyle: 'classic',
   gamePath: detectGamePath(),
   screenshotsPath: join(app.getPath('documents'), 'Escape from Tarkov', 'Screenshots'),
   gameMode: 'auto',
@@ -22,7 +24,7 @@ const defaultSettings = (): Settings => ({
 })
 
 let settings: Settings
-let progress: Progress = readJson<Progress>('progress.json', { playerLevel: 1, tasks: {}, objectives: {} })
+let progress: Progress = readJson<Progress>('progress.json', { playerLevel: 1, tasks: {}, objectives: {}, hideout: {} })
 let data: GameData | null = null
 let overlayMode: OverlayMode = 'hidden'
 const live: LiveState = {
@@ -86,6 +88,10 @@ async function loadData(force = false): Promise<void> {
     pushLive()
   }
 }
+
+// ---------- обновления ----------
+
+const updater = initUpdater((state) => send('update', state))
 
 // ---------- Кочевники ----------
 
@@ -284,6 +290,13 @@ function registerIpc(): void {
     send('progress', progress)
     return progress
   })
+  ipcMain.handle('progress:hideout', (_e, id: string, level: number) => {
+    if (level > 0) progress.hideout[id] = level
+    else delete progress.hideout[id]
+    writeJson('progress.json', progress)
+    send('progress', progress)
+    return progress
+  })
   ipcMain.handle('progress:objective', (_e, id: string, done: boolean) => {
     if (done) progress.objectives[id] = true
     else delete progress.objectives[id]
@@ -292,6 +305,9 @@ function registerIpc(): void {
     return progress
   })
   ipcMain.handle('goons:get', () => goons)
+  ipcMain.handle('update:get', () => updater.get())
+  ipcMain.handle('update:check', () => updater.check())
+  ipcMain.handle('update:install', () => updater.install())
   ipcMain.handle('guide:get', async (_e, name: string) => {
     try {
       return await getGuide(name)

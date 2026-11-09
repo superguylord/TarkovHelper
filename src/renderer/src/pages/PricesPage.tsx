@@ -23,7 +23,7 @@ export function PricesPage({ s }: { s: AppState }) {
         <input className="search wide" autoFocus placeholder="Название, например «Видеокарта» или «GPU»" value={query} onChange={(e) => setQuery(e.target.value)} />
         <div className="cards">
           {found.map((it) => (
-            <PriceCard key={it.id} item={it} data={data} />
+            <PriceCard key={it.id} item={it} data={data} progress={s.progress} />
           ))}
         </div>
       </section>
@@ -34,7 +34,7 @@ export function PricesPage({ s }: { s: AppState }) {
         </p>
         {price ? (
           <>
-            {price.item ? <PriceCard item={price.item} data={data} /> : <div className="empty">Предмет не распознан.</div>}
+            {price.item ? <PriceCard item={price.item} data={data} progress={s.progress} /> : <div className="empty">Предмет не распознан.</div>}
             <p className="muted small">Распознано: «{price.text.replace(/\s+/g, ' ').slice(0, 120)}»</p>
             {price.candidates.length > 1 && (
               <p className="muted small">Другие варианты: {price.candidates.slice(1).map((c) => c.name).join(', ')}</p>
