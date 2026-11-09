@@ -1,7 +1,7 @@
 {
   "name": "tarkov-helper",
   "productName": "TarkovHelper",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "private": true,
   "description": "Личный помощник для Escape from Tarkov: карта, квесты, цены",
   "main": "out/main/index.js",
