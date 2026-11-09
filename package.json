@@ -11,7 +11,8 @@
     "start": "electron-vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
     "pack": "electron-vite build && electron-builder --dir",
-    "installer": "electron-vite build && electron-builder --win nsis"
+    "installer": "electron-vite build && electron-builder --win nsis --publish never",
+    "release": "powershell -ExecutionPolicy Bypass -File scripts/release.ps1"
   },
   "build": {
     "appId": "local.tarkovhelper",
@@ -40,7 +41,15 @@
       ],
       "language": "1049",
       "deleteAppDataOnUninstall": false
-    }
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "superguylord",
+        "repo": "TarkovHelper",
+        "releaseType": "release"
+      }
+    ]
   },
   "dependencies": {
     "@fontsource/inter": "^5.3.0",
@@ -63,5 +72,9 @@
     "typescript": "^7.0.2",
     "vite": "^8.3.6"
   },
-  "author": "Anton"
+  "author": "Anton",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/superguylord/TarkovHelper.git"
+  }
 }
