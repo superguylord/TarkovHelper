@@ -33,15 +33,15 @@ const SECTIONS: { title: string; items: [Tab, string, ReactNode][] }[] = [
     items: [
       ['briefing', 'Брифинг', icon('M3 11l9-7 9 7v9a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z')],
       ['quests', 'Задания', icon('M9 6h11M9 12h11M9 18h11M4 6h.01M4 12h.01M4 18h.01')],
-      ['map', 'Карты', icon('M9 4L3 6v14l6-2 6 2 6-2V4l-6 2-6-2zM9 4v14M15 6v14')],
-      ['hideout', 'Убежище', icon('M3 20h18M5 20V10l7-5 7 5v10M10 20v-5h4v5')]
+      ['map', 'Карты', icon('M9 4L3 6v14l6-2 6 2 6-2V4l-6 2-6-2zM9 4v14M15 6v14')]
     ]
   },
   {
     title: 'Экономика',
     items: [
       ['prices', 'Барахолка', icon('M12 3v18M17 7H9.5a3 3 0 0 0 0 6h5a3 3 0 0 1 0 6H6')],
-      ['traders', 'Торговцы', icon('M4 9l1.5-5h13L20 9M4 9h16v11H4zM9 20v-6h6v6')]
+      ['traders', 'Торговцы', icon('M4 9l1.5-5h13L20 9M4 9h16v11H4zM9 20v-6h6v6')],
+      ['hideout', 'Убежище', icon('M3 20h18M5 20V10l7-5 7 5v10M10 20v-5h4v5')]
     ]
   },
   {

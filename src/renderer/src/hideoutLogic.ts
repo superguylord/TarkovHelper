@@ -16,6 +16,20 @@ export const isMoney = (itemId: string) => itemId in MONEY
 export const formatCount = (itemId: string, count: number) => (MONEY[itemId] ? MONEY[itemId](count) : `×${count}`)
 export const needName = (itemId: string, name: string) => MONEY_NAMES[itemId] ?? name
 
+const MONEY_SIGN: Record<string, string> = { [ROUBLES]: '₽', '5696686a4bdc2da3298b456a': '$', '569668774bdc2da2298b4568': '€' }
+/** Короткая запись для плитки предмета: «×3», «950 тыс ₽», «1,2 млн ₽». */
+export function shortCount(itemId: string, count: number): string {
+  const sign = MONEY_SIGN[itemId]
+  if (!sign) return `×${count}`
+  const short =
+    count >= 1e6
+      ? `${(count / 1e6).toLocaleString('ru-RU', { maximumFractionDigits: 1 })} млн`
+      : count >= 1e4
+        ? `${Math.round(count / 1e3)} тыс`
+        : count.toLocaleString('ru-RU')
+  return `${short} ${sign}`
+}
+
 export const builtLevel = (station: HideoutStation, progress: Progress) => progress.hideout?.[station.id] ?? 0
 export const maxLevel = (station: HideoutStation) => station.levels[station.levels.length - 1]?.level ?? 0
 export const nextLevel = (station: HideoutStation, progress: Progress): HideoutLevel | null =>

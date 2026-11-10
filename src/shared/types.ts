@@ -141,6 +141,8 @@ export interface HideoutLevel {
 export interface HideoutStation {
   id: string
   name: string
+  image?: string // значок зоны как в игре
+  area?: number // номер зоны в игре — в этом порядке зоны идут на панели убежища
   levels: HideoutLevel[]
 }
 

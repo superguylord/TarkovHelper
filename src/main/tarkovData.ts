@@ -587,6 +587,8 @@ function buildHideout({ data, ru }: { data: any; ru: Dict }, traders: Dict, item
     .map((s) => ({
       id: s.id,
       name: stationName[s.id],
+      image: s.imageLink,
+      area: s.areaType,
       levels: (s.levels ?? [])
         .map((l: any) => ({
           level: l.level,
@@ -630,7 +632,7 @@ function itemsUsedInTasks(tasks: any[]): Map<string, string[]> {
 // версия в имени: при смене формата данных старый кэш просто не читается
 const cacheName = (mode: GameMode) => `gamedata-v${CACHE_VERSION}-${mode}.json`
 
-const CACHE_VERSION = 10
+const CACHE_VERSION = 11
 
 export function loadCached(mode: GameMode): GameData | null {
   for (let v = CACHE_VERSION; v >= 2; v--) {
