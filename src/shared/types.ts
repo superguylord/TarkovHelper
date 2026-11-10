@@ -20,6 +20,14 @@ export interface Extract {
   note?: string // условие выхода: оплата, предмет, переход на другую карту
 }
 
+export interface MapLabel {
+  x: number
+  z: number
+  text: string
+  size?: number // относительный размер шрифта, 100 — обычный (у мелких подписей 60–90)
+  rotation?: number // поворот в градусах (названия улиц)
+}
+
 export interface MapInfo {
   normalizedName: string
   name: string
@@ -27,7 +35,7 @@ export interface MapInfo {
   svgPath?: string
   svgLayer?: string // слой основного уровня внутри SVG
   layers: MapLayer[] // этажи и подземные уровни
-  labels: { x: number; z: number; text: string }[] // подписи районов и зданий
+  labels: MapLabel[] // подписи районов и зданий
   tilePath?: string
   tileSize?: number
   minZoom?: number

@@ -15,7 +15,7 @@ import { initUpdater } from './updater'
 // ---------- состояние ----------
 
 const defaultSettings = (): Settings => ({
-  mapStyle: 'classic',
+  mapStyle: 'scheme',
   gamePath: detectGamePath(),
   screenshotsPath: join(app.getPath('documents'), 'Escape from Tarkov', 'Screenshots'),
   gameMode: 'auto',

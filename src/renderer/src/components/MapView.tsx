@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import L from 'leaflet'
-import type { MapInfo, MapStyle, PlayerPosition, Point3 } from '@shared/types'
+import type { MapInfo, MapLabel, MapStyle, PlayerPosition, Point3 } from '@shared/types'
 import { availableLayers, layerOfPoint, usesTiles } from '../mapLayers'
+import { paletteFor } from '../mapPalette'
 
 // Проекция карт как на tarkov.dev: игровые координаты (x, z) -> lat/lng с поворотом
 // и линейным преобразованием из maps.json.
@@ -87,8 +88,7 @@ interface Props {
   focus?: Point3[] | null // показать эти точки целиком (например, выбранный квест)
   style: MapStyle
   layer: string | null // активный этаж; null — основной уровень
-  // панель этажа: неподвижная карта, показывающая один прямоугольник [x1, z1, x2, z2] (null — всю карту)
-  inset?: { rect: [number, number, number, number] | null }
+  labels?: MapLabel[] // подписи районов поверх карты
   onMarkerClick?: (marker: MapMarker) => void
 }
 
@@ -105,11 +105,13 @@ export function loadSvg(path: string): Promise<string> {
   return p
 }
 
-export function MapView({ map, markers, position, focus, style, layer, inset, onMarkerClick }: Props) {
+export function MapView({ map, markers, position, focus, style, layer, labels, onMarkerClick }: Props) {
   const el = useRef<HTMLDivElement>(null)
   const lmap = useRef<L.Map | null>(null)
   const markerLayer = useRef<L.LayerGroup | null>(null)
   const playerLayer = useRef<L.LayerGroup | null>(null)
+  const labelLayer = useRef<L.LayerGroup | null>(null)
+  const declutterRef = useRef<() => void>(() => {}) // перераскладка подписей, когда меняются значки
   const svgRef = useRef<SVGElement | null>(null) // векторная подложка (все этажи внутри)
   const baseTiles = useRef<L.TileLayer | null>(null)
   const floorTiles = useRef<L.TileLayer | null>(null)
@@ -122,23 +124,13 @@ export function MapView({ map, markers, position, focus, style, layer, inset, on
     if (!el.current) return
     const m = L.map(el.current, {
       crs: makeCrs(map),
-      zoomSnap: inset ? 0.05 : 0.25,
+      zoomSnap: 0.25,
       minZoom: (map.minZoom ?? 1) - 2,
-      maxZoom: (map.maxZoom ?? 6) + 3,
-      // панель этажа неподвижна: клик по ней обрабатывает список этажей
-      ...(inset
-        ? { zoomControl: false, attributionControl: false, dragging: false, scrollWheelZoom: false, doubleClickZoom: false, boxZoom: false, keyboard: false }
-        : {})
+      maxZoom: (map.maxZoom ?? 6) + 2
     })
     m.attributionControl?.setPrefix(false).addAttribution('Карты: tarkov.dev (CC BY-NC-SA 4.0)')
     const bounds = mapBounds(map)
-    const fitInset = () => {
-      const r = inset?.rect
-      const target = r ? L.latLngBounds([L.latLng(r[1], r[0]), L.latLng(r[3], r[2])]).pad(0.12) : bounds
-      if (target) m.fitBounds(target, { animate: false })
-    }
-    if (inset) fitInset()
-    else if (bounds) m.fitBounds(bounds)
+    if (bounds) m.fitBounds(bounds)
     else m.setView([0, 0], 2)
 
     let cancelled = false
@@ -164,13 +156,11 @@ export function MapView({ map, markers, position, focus, style, layer, inset, on
       setBaseReady((n) => n + 1)
     }
 
+    labelLayer.current = L.layerGroup().addTo(m)
     markerLayer.current = L.layerGroup().addTo(m)
     playerLayer.current = L.layerGroup().addTo(m)
     lmap.current = m
-    const ro = new ResizeObserver(() => {
-      m.invalidateSize()
-      if (inset) fitInset() // у панели размер появляется после вёрстки — подгоняем кадр заново
-    })
+    const ro = new ResizeObserver(() => m.invalidateSize())
     ro.observe(el.current)
     return () => {
       cancelled = true
@@ -178,7 +168,73 @@ export function MapView({ map, markers, position, focus, style, layer, inset, on
       m.remove()
       lmap.current = null
     }
-  }, [map, tiles, inset?.rect?.join(',')]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [map, tiles])
+
+  // свои цвета карты: стиль подмешивается внутрь SVG и перекрывает исходные классы
+  useEffect(() => {
+    const svg = svgRef.current
+    if (!svg) return
+    let el = svg.querySelector('style#th-palette')
+    if (!el) {
+      el = document.createElementNS('http://www.w3.org/2000/svg', 'style')
+      el.id = 'th-palette'
+      svg.appendChild(el)
+    }
+    el.textContent = paletteFor(style)
+  }, [style, baseReady])
+
+  // подписи районов. Крупные важнее мелких; подпись, которая налезла бы на уже показанную подпись,
+  // значок или табличку выхода, прячем — при отдалении остаются главные районы, при приближении
+  // появляются здания и магазины
+  useEffect(() => {
+    const m = lmap.current
+    const group = labelLayer.current
+    if (!m || !group) return
+    group.clearLayers()
+    const placed = [...(labels ?? [])]
+      .sort((a, b) => (b.size ?? 100) - (a.size ?? 100))
+      .map((l) => {
+        const minor = (l.size ?? 100) < 100
+        const font = (8 + (3 * (l.size ?? 100)) / 100).toFixed(1)
+        const turn = l.rotation ? ` rotate(${l.rotation}deg)` : ''
+        const marker = L.marker(L.latLng(l.z, l.x), {
+          icon: L.divIcon({
+            className: `map-label${minor ? ' map-label-minor' : ''}`,
+            html: `<span style="font-size:${font}px;transform:translate(-50%,-50%)${turn}">${escapeHtml(l.text)}</span>`,
+            iconSize: [0, 0]
+          }),
+          interactive: false,
+          keyboard: false
+        })
+        group.addLayer(marker)
+        return marker
+      })
+    const declutter = () => {
+      // значки на карте и постоянные таблички выходов — подписи их не перекрывают
+      const obstacles = [
+        ...m.getPane('markerPane')!.querySelectorAll(':scope > :not(.map-label)'),
+        ...m.getPane('tooltipPane')!.children
+      ].map((e) => e.getBoundingClientRect())
+      const taken: DOMRect[] = []
+      const near = (r: DOMRect, t: DOMRect, gx: number, gy: number) =>
+        r.left < t.right + gx && r.right > t.left - gx && r.top < t.bottom + gy && r.bottom > t.top - gy
+      for (const marker of placed) {
+        const span = marker.getElement()?.firstElementChild as HTMLElement | null
+        if (!span) continue
+        const r = span.getBoundingClientRect()
+        const hit = taken.some((t) => near(r, t, 18, 10)) || obstacles.some((t) => near(r, t, 4, 2))
+        span.style.visibility = hit ? 'hidden' : ''
+        if (!hit) taken.push(r)
+      }
+    }
+    declutterRef.current = declutter
+    declutter()
+    m.on('zoomend', declutter)
+    return () => {
+      m.off('zoomend', declutter)
+      declutterRef.current = () => {}
+    }
+  }, [labels, map, baseReady])
 
   // этаж: показываем его слой поверх основного уровня, основной приглушаем
   useEffect(() => {
@@ -240,11 +296,13 @@ export function MapView({ map, markers, position, focus, style, layer, inset, on
         className: `mk-tip${isQuest(mk.kind) ? '' : ' mk-tip-exit'}`,
         direction: 'top',
         offset: TIP_OFFSET[mk.kind],
-        permanent: !isQuest(mk.kind) && !inset
+        permanent: !isQuest(mk.kind)
       })
       if (onMarkerClick) marker.on('click', () => onMarkerClick(mk))
       group.addLayer(marker)
     }
+    const frame = requestAnimationFrame(() => declutterRef.current())
+    return () => cancelAnimationFrame(frame)
   }, [markers, map, layer, tiles, onMarkerClick]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // приблизить к выбранным точкам
@@ -282,10 +340,10 @@ export function MapView({ map, markers, position, focus, style, layer, inset, on
       iconAnchor: [48, 48]
     })
     layer.addLayer(L.marker(here, { icon, interactive: false }))
-    if (!inset) m.panTo(here)
+    m.panTo(here)
   }, [position, map])
 
-  return <div ref={el} className={`map style-${style}${tiles ? ' map-tiles' : ''}${inset ? ' map-inset' : ''}`} />
+  return <div ref={el} className={`map style-${style}${tiles ? ' map-tiles' : ''}`} />
 }
 
 const CONE_SVG = `<svg viewBox="0 0 96 96" width="96" height="96">

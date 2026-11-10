@@ -25,6 +25,12 @@
       "out/**/*"
     ],
     "asar": false,
+    "extraResources": [
+      {
+        "from": "resources/ocr",
+        "to": "ocr"
+      }
+    ],
     "win": {
       "target": "dir",
       "icon": "build/icon.png"

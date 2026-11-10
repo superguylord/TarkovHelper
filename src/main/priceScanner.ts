@@ -17,14 +17,28 @@ const AREA = { left: 120, up: 110, right: 520, down: 110 } // область в�
 
 let worker: Promise<Worker> | null = null
 
+// языковые данные OCR лежат в самом приложении (resources/ocr) — интернет для F9 не нужен
+const ocrDataDir = () =>
+  app.isPackaged ? join(process.resourcesPath, 'ocr') : join(app.getAppPath(), 'resources', 'ocr')
+
 function getWorker(): Promise<Worker> {
-  // языковые данные скачиваются один раз и кэшируются в папке приложения.
-  // Только русский: вместе с английским OCR путает похожие буквы (В/B, а/a)
-  worker ??= createWorker('rus', 1, { cachePath: app.getPath('userData') }).then(async (w) => {
-    // разреженный текст: отдельные надписи без абзацев, как в интерфейсе игры
-    await w.setParameters({ tessedit_pageseg_mode: PSM.SPARSE_TEXT })
-    return w
+  // Только русский: вместе с английским OCR путает похожие буквы (В/B, а/a).
+  // Распакованная копия кэшируется в папке данных приложения.
+  worker ??= createWorker('rus', 1, {
+    langPath: ocrDataDir(),
+    cachePath: app.getPath('userData'),
+    // без обработчика tesseract.js бросает ошибку прямо в главный процесс и роняет приложение
+    errorHandler: (e: unknown) => console.error('OCR:', e)
   })
+    .then(async (w) => {
+      // разреженный текст: отдельные надписи без абзацев, как в интерфейсе игры
+      await w.setParameters({ tessedit_pageseg_mode: PSM.SPARSE_TEXT })
+      return w
+    })
+    .catch((e) => {
+      worker = null // не запустился — попробуем снова при следующем нажатии F9
+      throw e
+    })
   return worker
 }
 
