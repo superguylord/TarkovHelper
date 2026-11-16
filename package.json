@@ -33,7 +33,8 @@
     ],
     "win": {
       "target": "dir",
-      "icon": "build/icon.png"
+      "icon": "build/icon.png",
+      "requestedExecutionLevel": "requireAdministrator"
     },
     "nsis": {
       "oneClick": true,

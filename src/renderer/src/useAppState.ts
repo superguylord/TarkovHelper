@@ -28,18 +28,34 @@ export function useAppState(): AppState {
   useEffect(() => {
     const api = window.api
     const set = (patch: Partial<AppState>) => setS((prev) => ({ ...prev, ...patch }))
-    Promise.all([api.getData(), api.getLive(), api.getProgress(), api.getSettings(), api.getGoons(), api.getUpdate()]).then(
-      ([data, live, progress, settings, goons, update]) => set({ data, live, progress, settings, goons, update })
-    )
+    // Стартовые значения грузим по отдельности: медленный запрос (доклад о Кочевниках идёт в сеть)
+    // не задерживает остальные. Если событие с более свежим значением пришло раньше ответа,
+    // ответ не применяем — иначе он затёр бы только что сделанное изменение.
+    const fresh = new Set<keyof AppState>()
+    const load = <K extends keyof AppState>(key: K, request: Promise<AppState[K]>) =>
+      request.then((value) => {
+        if (!fresh.has(key)) set({ [key]: value } as Partial<AppState>)
+      })
+    const listen = <K extends keyof AppState>(channel: Parameters<typeof api.on>[0], key: K) =>
+      api.on(channel, (value) => {
+        fresh.add(key)
+        set({ [key]: value } as Partial<AppState>)
+      })
+    load('data', api.getData())
+    load('live', api.getLive())
+    load('progress', api.getProgress())
+    load('settings', api.getSettings())
+    load('goons', api.getGoons())
+    load('update', api.getUpdate())
     const offs = [
-      api.on('data', (data) => set({ data })),
-      api.on('live', (live) => set({ live })),
-      api.on('progress', (progress) => set({ progress })),
-      api.on('settings', (settings) => set({ settings })),
-      api.on('price', (price) => set({ price })),
-      api.on('overlay-mode', (overlayMode) => set({ overlayMode })),
-      api.on('goons', (goons) => set({ goons })),
-      api.on('update', (update) => set({ update }))
+      listen('data', 'data'),
+      listen('live', 'live'),
+      listen('progress', 'progress'),
+      listen('settings', 'settings'),
+      listen('price', 'price'),
+      listen('overlay-mode', 'overlayMode'),
+      listen('goons', 'goons'),
+      listen('update', 'update')
     ]
     return () => offs.forEach((off) => off())
   }, [])

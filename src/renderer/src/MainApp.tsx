@@ -2,6 +2,8 @@ import { useState, type ReactNode } from 'react'
 import { useAppState, type AppState } from './useAppState'
 import type { RaidPlan } from './raidPlan'
 import { BriefingPage } from './pages/BriefingPage'
+import { PROFILE_LABEL } from '@shared/types'
+import { StoryPage } from './pages/StoryPage'
 import { HideoutPage } from './pages/HideoutPage'
 import { MapPage } from './pages/MapPage'
 import { QuestsPage } from './pages/QuestsPage'
@@ -9,7 +11,7 @@ import { PricesPage } from './pages/PricesPage'
 import { TradersPage } from './pages/TradersPage'
 import { SettingsPage } from './pages/SettingsPage'
 
-export type Tab = 'briefing' | 'quests' | 'map' | 'hideout' | 'prices' | 'traders' | 'settings'
+export type Tab = 'briefing' | 'quests' | 'story' | 'map' | 'hideout' | 'prices' | 'traders' | 'settings'
 
 /** Переходы между разделами и план рейда (живёт, пока открыто окно). */
 export interface Nav {
@@ -32,8 +34,14 @@ const SECTIONS: { title: string; items: [Tab, string, ReactNode][] }[] = [
     title: 'Операции',
     items: [
       ['briefing', 'Брифинг', icon('M3 11l9-7 9 7v9a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z')],
-      ['quests', 'Задания', icon('M9 6h11M9 12h11M9 18h11M4 6h.01M4 12h.01M4 18h.01')],
       ['map', 'Карты', icon('M9 4L3 6v14l6-2 6 2 6-2V4l-6 2-6-2zM9 4v14M15 6v14')]
+    ]
+  },
+  {
+    title: 'Квесты',
+    items: [
+      ['quests', 'Задания', icon('M9 6h11M9 12h11M9 18h11M4 6h.01M4 12h.01M4 18h.01')],
+      ['story', 'Сюжет', icon('M6 3v12M6 15a3 3 0 1 0 0 6 3 3 0 0 0 0-6zM18 3a3 3 0 1 0 0 6 3 3 0 0 0 0-6zM18 9c0 4-6 3-12 6')]
     ]
   },
   {
@@ -54,6 +62,7 @@ function TabContent({ tab, s, nav }: { tab: Tab; s: AppState; nav: Nav }) {
   if (tab === 'briefing') return <BriefingPage s={s} nav={nav} />
   if (tab === 'map') return <MapPage s={s} nav={nav} />
   if (tab === 'quests') return <QuestsPage s={s} />
+  if (tab === 'story') return <StoryPage s={s} />
   if (tab === 'hideout') return <HideoutPage s={s} />
   if (tab === 'prices') return <PricesPage s={s} />
   if (tab === 'traders') return <TradersPage s={s} />
@@ -83,7 +92,7 @@ function Status({ s }: { s: AppState }) {
       <div>
         <div className="status-main">{live?.inRaid ? `В рейде · ${mapName ?? '?'}` : 'В меню'}</div>
         <div className="status-sub">
-          {(data?.gameMode ?? live?.detectedMode) === 'pve' ? 'PvE' : 'PvP'}
+          {PROFILE_LABEL[live?.profile ?? 'pvp']}
           {!live?.inRaid && mapName ? ` · последняя карта: ${mapName}` : ''}
         </div>
       </div>
@@ -111,9 +120,32 @@ export function Shell({ s, overlay }: { s: AppState; overlay?: boolean }) {
     <div className="shell">
       <aside className="sidebar">
         <Logo />
+        {/* сигнал об обновлении — сразу под логотипом, чтобы его нельзя было не заметить */}
+        {s.update?.status === 'ready' && (
+          <button className="update-alert ready" onClick={() => window.api.installUpdate()} title="Приложение перезапустится и обновится">
+            <span className="update-dot" />
+            <span>
+              <b>Вышла версия {s.update.version}</b>
+              <small>Нажмите, чтобы обновить</small>
+            </span>
+          </button>
+        )}
+        {s.update?.status === 'downloading' && (
+          <div className="update-alert">
+            <span className="update-dot" />
+            <span>
+              <b>Вышла версия {s.update.version}</b>
+              <small>Загружается — {s.update.percent ?? 0}%</small>
+            </span>
+          </div>
+        )}
         {SECTIONS.map((sec) => (
           <div key={sec.title} className="side-section">
-            <div className="side-title">{sec.title}</div>
+            <div className="side-title">
+              {sec.title}
+              {/* у каждого персонажа свои квесты — показываем, чьи сейчас открыты */}
+              {sec.title === 'Квесты' && <span className="side-profile">{PROFILE_LABEL[s.live?.profile ?? 'pvp']}</span>}
+            </div>
             {sec.items.map(([t, label, ic]) => (
               <button key={t} className={tab === t ? 'side-link active' : 'side-link'} onClick={() => setTab(t)}>
                 {ic}
@@ -123,16 +155,6 @@ export function Shell({ s, overlay }: { s: AppState; overlay?: boolean }) {
           </div>
         ))}
         <div className="side-bottom">
-          {s.update?.status === 'ready' && (
-            <button className="btn btn-brass" onClick={() => window.api.installUpdate()} title="Приложение перезапустится">
-              Обновить до {s.update.version}
-            </button>
-          )}
-          {s.update?.status === 'downloading' && (
-            <div className="muted small update-note">
-              Загружается версия {s.update.version} — {s.update.percent ?? 0}%
-            </div>
-          )}
           <Status s={s} />
           {overlay ? (
             <button className="btn" onClick={() => window.api.setOverlayMode('hidden')}>

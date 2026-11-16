@@ -2,6 +2,12 @@
 
 export type GameMode = 'regular' | 'pve'
 
+/** Персонаж: обычный PvP, сезонный PvP и PvE — у каждого свои квесты, убежище и уровень. */
+export type Profile = 'pvp' | 'season' | 'pve'
+export const PROFILE_LABEL: Record<Profile, string> = { pvp: 'PvP', season: 'PvP Сезон', pve: 'PvE' }
+/** Данные tarkov.dev есть для двух режимов; сезонный персонаж играет на обычных PvP-данных. */
+export const dataMode = (p: Profile): GameMode => (p === 'pve' ? 'pve' : 'regular')
+
 export interface Point3 {
   x: number
   y: number
@@ -28,6 +34,22 @@ export interface MapLabel {
   rotation?: number // поворот в градусах (названия улиц)
 }
 
+export interface MapBoss {
+  name: string
+  chance: number // 0..1
+  zones: string[] // где появляется (если в данных есть названия мест)
+}
+
+/** Глава сюжета с tarkov.help: связи «что открывает что» дают ветки и концовки. */
+export interface StoryNode {
+  slug: string
+  name: string
+  parents: string[] // slug глав, после которых открывается
+  next: string[] // slug следующих глав
+  goals: string[] // цели главы
+  url: string
+}
+
 export interface MapInfo {
   normalizedName: string
   name: string
@@ -36,6 +58,8 @@ export interface MapInfo {
   svgLayer?: string // слой основного уровня внутри SVG
   layers: MapLayer[] // этажи и подземные уровни
   labels: MapLabel[] // подписи районов и зданий
+  spawns?: Point3[] // спауны ЧВК (близкие точки одного места слиты в одну)
+  bosses?: MapBoss[] // боссы локации с шансом появления
   tilePath?: string
   tileSize?: number
   minZoom?: number
@@ -87,6 +111,7 @@ export interface Task {
   map: string | null
   minPlayerLevel: number
   kappaRequired: boolean
+  traderLevels?: { trader: string; level: number }[] // лояльность торговцев, без которой квест не взять
   wikiLink: string
   requires: { taskId: string; status: string[] }[]
   neededKeys: { map: string | null; keys: string[] }[] // ключи, которые понадобятся, по картам
@@ -164,6 +189,7 @@ export interface Progress {
   tasks: Record<string, TaskStatus>
   objectives: Record<string, boolean> // цели, отмеченные выполненными вручную
   hideout: Record<string, number> // построенный уровень модуля убежища
+  traders?: Record<string, number> // уровень лояльности торговца (по имени); не задан — 1
 }
 
 export interface Hotkeys {
@@ -171,15 +197,17 @@ export interface Hotkeys {
   price: string // цена предмета под курсором
 }
 
-export type MapStyle = 'classic' | 'scheme' | 'khaki' | 'night' | 'detailed'
+// scheme — своя перерисованная векторная карта, detailed — подробная подложка (вид сверху, как со спутника)
+export type MapStyle = 'scheme' | 'detailed'
 
 export interface Settings {
   mapStyle: MapStyle
   gamePath: string
   screenshotsPath: string
-  gameMode: 'auto' | GameMode
+  gameMode: 'auto' | Profile // какой персонаж сейчас: по логам или выбранный вручную
   hotkeys: Hotkeys
   deleteScreenshots: boolean // удалять скриншоты после чтения позиции
+  settingsVersion: number // для разовых переносов старых настроек
 }
 
 export interface PlayerPosition extends Point3 {
@@ -198,10 +226,12 @@ export interface PriceResult {
 export interface LiveState {
   currentMap: string | null
   inRaid: boolean
-  detectedMode: GameMode | null
+  detectedMode: Profile | null // персонаж по логам игры
+  profile: Profile // персонаж, чей прогресс сейчас показан
   position: PlayerPosition | null
   logStatus: string
   dataStatus: string
+  hotkeyProblems: string[] // клавиши, которые не удалось занять (заняты другой программой или записаны неверно)
 }
 
 /** Гайд по квесту с tarkov.help: HTML страницы прохождения (текст и скриншоты мест). */
@@ -246,7 +276,9 @@ export interface Api {
   setPlayerLevel(level: number): Promise<Progress>
   setObjectiveDone(objectiveId: string, done: boolean): Promise<Progress>
   setHideoutLevel(stationId: string, level: number): Promise<Progress>
-  getGuide(taskName: string): Promise<QuestGuide | null>
+  setTraderLevel(trader: string, level: number): Promise<Progress>
+  getGuide(taskName: string, slug?: string): Promise<QuestGuide | null>
+  getStory(): Promise<StoryNode[]>
   getGoons(): Promise<GoonsState>
   getUpdate(): Promise<UpdateState>
   checkUpdate(): Promise<void>

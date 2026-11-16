@@ -2,9 +2,6 @@ import type { MapInfo, MapLayer, MapStyle, Point3 } from '@shared/types'
 
 export const MAP_STYLES: [MapStyle, string][] = [
   ['scheme', 'Схема'],
-  ['classic', 'Классика'],
-  ['khaki', 'Хаки'],
-  ['night', 'Тёмная'],
   ['detailed', 'Подробная']
 ]
 

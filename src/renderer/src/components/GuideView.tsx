@@ -51,7 +51,7 @@ function parseGuide(html: string): Block[] {
 
 const cache = new Map<string, Promise<QuestGuide | null>>()
 
-export function GuideView({ taskName }: { taskName: string }) {
+export function GuideView({ taskName, slug }: { taskName: string; slug?: string }) {
   const [guide, setGuide] = useState<QuestGuide | null | 'loading' | 'error'>('loading')
   const [zoom, setZoom] = useState<string | null>(null)
 
@@ -60,7 +60,7 @@ export function GuideView({ taskName }: { taskName: string }) {
     setGuide('loading')
     let p = cache.get(taskName)
     if (!p) {
-      p = window.api.getGuide(taskName)
+      p = window.api.getGuide(taskName, slug)
       cache.set(taskName, p)
     }
     p.then((g) => alive && setGuide(g)).catch(() => {
@@ -70,7 +70,7 @@ export function GuideView({ taskName }: { taskName: string }) {
     return () => {
       alive = false
     }
-  }, [taskName])
+  }, [taskName, slug])
 
   const blocks = useMemo(() => (guide && typeof guide === 'object' ? parseGuide(guide.html) : []), [guide])
 

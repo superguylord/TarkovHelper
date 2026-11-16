@@ -1,14 +1,16 @@
 import { app, BrowserWindow, dialog, globalShortcut, ipcMain, screen, shell } from 'electron'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
-import type { GameData, GameMode, GoonsState, LiveState, OverlayMode, Progress, Settings, TaskStatus } from '@shared/types'
+import type { GameData, GameMode, GoonsState, LiveState, OverlayMode, Profile, Progress, Settings, TaskStatus } from '@shared/types'
+import { dataMode } from '@shared/types'
 import { readJson, writeJson } from './store'
 import { detectGamePath } from './gamePath'
 import { fetchGameData, loadCached } from './tarkovData'
 import { LogWatcher } from './logWatcher'
 import { ScreenshotWatcher } from './screenshotWatcher'
-import { matchItems, scanPrice, warmUpOcr } from './priceScanner'
-import { getGuide } from './tarkovHelp'
+import { scanPrice, warmUpOcr } from './priceScanner'
+import { searchItems } from './priceMatch'
+import { getGuide, getStory } from './tarkovHelp'
 import { fetchGoons } from './goons'
 import { initUpdater } from './updater'
 
@@ -19,12 +21,24 @@ const defaultSettings = (): Settings => ({
   gamePath: detectGamePath(),
   screenshotsPath: join(app.getPath('documents'), 'Escape from Tarkov', 'Screenshots'),
   gameMode: 'auto',
-  hotkeys: { overlay: 'F8', price: 'F9' },
+  hotkeys: { overlay: 'F8', price: 'F7' },
+  settingsVersion: 2,
   deleteScreenshots: true
 })
 
 let settings: Settings
-let progress: Progress = readJson<Progress>('progress.json', { playerLevel: 1, tasks: {}, objectives: {}, hideout: {} })
+// У каждого персонажа (PvP, сезон, PvE) свой файл прогресса. До разделения был один progress.json —
+// он достаётся обычному PvP, чтобы ничего не потерялось.
+const emptyProgress = (): Progress => ({ playerLevel: 1, tasks: {}, objectives: {}, hideout: {} })
+const progressFile = (p: Profile) => `progress-${p}.json`
+function loadProgress(p: Profile): Progress {
+  const own = readJson<Progress | null>(progressFile(p), null)
+  if (own) return { ...emptyProgress(), ...own }
+  return p === 'pvp' ? readJson<Progress>('progress.json', emptyProgress()) : emptyProgress()
+}
+let profile: Profile = 'pvp'
+let progress: Progress = emptyProgress()
+const saveProgress = () => writeJson(progressFile(profile), progress)
 let data: GameData | null = null
 let overlayMode: OverlayMode = 'hidden'
 const live: LiveState = {
@@ -33,14 +47,42 @@ const live: LiveState = {
   detectedMode: null,
   position: null,
   logStatus: 'Логи ещё не прочитаны',
-  dataStatus: 'Загрузка данных…'
+  dataStatus: 'Загрузка данных…',
+  profile: 'pvp',
+  hotkeyProblems: []
 }
 
 let mainWin: BrowserWindow | null = null
 let overlayWin: BrowserWindow | null = null
 
-const effectiveMode = (): GameMode =>
-  settings.gameMode === 'auto' ? (live.detectedMode ?? 'regular') : settings.gameMode
+const effectiveProfile = (): Profile => (settings.gameMode === 'auto' ? (live.detectedMode ?? profile) : settings.gameMode)
+const effectiveMode = (): GameMode => dataMode(profile)
+
+/** Переключает приложение на персонажа: его прогресс и данные его режима. */
+function applyProfile(): void {
+  const next = effectiveProfile()
+  if (next !== profile) {
+    profile = next
+    progress = loadProgress(profile)
+    writeJson('last-profile.json', { profile })
+    send('progress', progress)
+  }
+  live.profile = profile
+  pushLive()
+  loadData()
+}
+
+/** Статус квеста для персонажа, который сейчас не открыт: правим его файл напрямую. */
+function setTaskFor(p: Profile, id: string, status: TaskStatus): void {
+  if (p === profile) {
+    if (progress.tasks[id] !== status) setTask(id, status)
+    return
+  }
+  const other = loadProgress(p)
+  if (other.tasks[id] === status) return
+  other.tasks[id] = status
+  writeJson(progressFile(p), other)
+}
 
 function send(channel: string, payload: unknown): void {
   for (const w of [mainWin, overlayWin]) {
@@ -59,6 +101,7 @@ async function loadData(force = false): Promise<void> {
     if (data) {
       send('data', data)
       resolveMap()
+      syncFromQuests()
     }
   }
   const stale = !data || !!data.outdated || Date.now() - data.fetchedAt > 60 * 60 * 1000
@@ -77,6 +120,7 @@ async function loadData(force = false): Promise<void> {
     }
     send('data', data)
     resolveMap()
+    syncFromQuests()
   } catch (e) {
     console.error(e)
     live.dataStatus = data
@@ -124,7 +168,39 @@ async function refreshGoons(): Promise<void> {
 function setTask(id: string, status: TaskStatus | null): void {
   if (status) progress.tasks[id] = status
   else delete progress.tasks[id]
-  writeJson('progress.json', progress)
+  raiseFromQuests()
+  saveProgress()
+  send('progress', progress)
+}
+
+/**
+ * Своего уровня и лояльности торговцев в логах игры нет. Но взятые и выполненные квесты там есть,
+ * а квест нельзя взять без нужного уровня и лояльности — значит, они у игрока не ниже требований
+ * таких квестов. Поднимаем значения до этой границы (вручную выставленное выше не трогаем).
+ * Возвращает true, если что-то изменилось.
+ */
+function raiseFromQuests(): boolean {
+  if (!data) return false
+  let changed = false
+  for (const t of data.tasks) {
+    const st = progress.tasks[t.id]
+    if (st !== 'active' && st !== 'completed') continue
+    if (t.minPlayerLevel > progress.playerLevel) {
+      progress.playerLevel = t.minPlayerLevel
+      changed = true
+    }
+    for (const r of t.traderLevels ?? []) {
+      if (r.level > (progress.traders?.[r.trader] ?? 1)) {
+        progress.traders = { ...progress.traders, [r.trader]: Math.min(4, r.level) }
+        changed = true
+      }
+    }
+  }
+  return changed
+}
+function syncFromQuests(): void {
+  if (!raiseFromQuests()) return
+  saveProgress()
   send('progress', progress)
 }
 
@@ -148,14 +224,13 @@ const logs = new LogWatcher(() => settings.gamePath, {
     live.inRaid = inRaid
     pushLive()
   },
-  onMode(mode) {
-    if (live.detectedMode === mode) return
-    live.detectedMode = mode
-    pushLive()
-    loadData()
+  onMode(p) {
+    if (live.detectedMode === p) return
+    live.detectedMode = p
+    applyProfile()
   },
-  onTask(id, status) {
-    if (progress.tasks[id] !== status) setTask(id, status)
+  onTask(id, status, p) {
+    setTaskFor(p, id, status)
   },
   onStatus(text) {
     if (live.logStatus === text) return
@@ -219,6 +294,8 @@ function createOverlayWindow(): void {
     webPreferences: { preload, backgroundThrottling: false }
   })
   overlayWin.setAlwaysOnTop(true, 'screen-saver')
+  // оверлей не попадает в снимки экрана: иначе сканер цены читал бы собственную карточку прошлого предмета
+  overlayWin.setContentProtection(true)
   overlayWin.setIgnoreMouseEvents(true, { forward: true })
   loadPage(overlayWin, 'overlay')
   overlayWin.once('ready-to-show', () => overlayWin?.showInactive())
@@ -249,16 +326,20 @@ async function checkPrice(): Promise<void> {
 
 function registerHotkeys(): void {
   globalShortcut.unregisterAll()
+  const problems: string[] = []
   const bind = (key: string, fn: () => void) => {
     if (!key) return
     try {
-      if (!globalShortcut.register(key, fn)) console.warn(`Клавиша ${key} занята`)
-    } catch (e) {
-      console.warn(`Неверная клавиша ${key}:`, e)
+      if (!globalShortcut.register(key, fn)) problems.push(`${key} — занята другой программой`)
+    } catch {
+      problems.push(`${key} — неверная запись клавиши`)
     }
   }
   bind(settings.hotkeys.overlay, () => setOverlayMode(overlayMode === 'full' ? 'hidden' : 'full'))
   bind(settings.hotkeys.price, () => checkPrice())
+  // показываем в настройках, иначе непонятно, почему клавиша «не работает»
+  live.hotkeyProblems = problems
+  pushLive()
 }
 
 // ---------- IPC ----------
@@ -274,7 +355,7 @@ function registerIpc(): void {
     if (prev.gamePath !== settings.gamePath) logs.start()
     if (prev.screenshotsPath !== settings.screenshotsPath) shots.start()
     else if (!prev.deleteScreenshots && settings.deleteScreenshots) shots.cleanup()
-    if (prev.gameMode !== settings.gameMode) loadData()
+    if (prev.gameMode !== settings.gameMode) applyProfile()
     registerHotkeys()
     send('settings', settings)
     return settings
@@ -286,21 +367,21 @@ function registerIpc(): void {
   })
   ipcMain.handle('progress:level', (_e, level: number) => {
     progress.playerLevel = level
-    writeJson('progress.json', progress)
+    saveProgress()
     send('progress', progress)
     return progress
   })
   ipcMain.handle('progress:hideout', (_e, id: string, level: number) => {
     if (level > 0) progress.hideout[id] = level
     else delete progress.hideout[id]
-    writeJson('progress.json', progress)
+    saveProgress()
     send('progress', progress)
     return progress
   })
   ipcMain.handle('progress:objective', (_e, id: string, done: boolean) => {
     if (done) progress.objectives[id] = true
     else delete progress.objectives[id]
-    writeJson('progress.json', progress)
+    saveProgress()
     send('progress', progress)
     return progress
   })
@@ -308,20 +389,36 @@ function registerIpc(): void {
   ipcMain.handle('update:get', () => updater.get())
   ipcMain.handle('update:check', () => updater.check())
   ipcMain.handle('update:install', () => updater.install())
-  ipcMain.handle('guide:get', async (_e, name: string) => {
+  ipcMain.handle('progress:trader', (_e, trader: string, level: number) => {
+    progress.traders = { ...progress.traders, [trader]: Math.max(1, Math.min(4, level)) }
+    saveProgress()
+    send('progress', progress)
+    return progress
+  })
+  ipcMain.handle('story:get', async () => {
     try {
-      return await getGuide(name)
+      return await getStory()
+    } catch (e) {
+      console.warn('Сюжет не загрузился:', e)
+      return []
+    }
+  })
+  ipcMain.handle('guide:get', async (_e, name: string, slug?: string) => {
+    try {
+      return await getGuide(name, slug)
     } catch (e) {
       console.warn('Гайд не загрузился:', e)
       return null
     }
   })
   ipcMain.handle('progress:import', () => {
+    // у каждого персонажа свои квесты: в текущего — в память, остальным — в их файлы
     const found = logs.importAll()
-    for (const [id, st] of found) progress.tasks[id] = st
-    writeJson('progress.json', progress)
+    for (const p of Object.keys(found) as Profile[]) for (const [id, st] of found[p]) setTaskFor(p, id, st)
+    raiseFromQuests()
+    saveProgress()
     send('progress', progress)
-    return found.size
+    return found[profile].size
   })
   ipcMain.handle('live:get', () => live)
   ipcMain.handle('live:map', (_e, map: string | null) => {
@@ -329,7 +426,7 @@ function registerIpc(): void {
     pushLive()
   })
   ipcMain.handle('price:check', () => checkPrice())
-  ipcMain.handle('items:search', (_e, q: string) => (data ? matchItems(data.items, [q], 12) : []))
+  ipcMain.handle('items:search', (_e, q: string) => (data ? searchItems(data.items, q, 12) : []))
   ipcMain.handle('overlay:mode', (_e, mode: OverlayMode) => setOverlayMode(mode))
   ipcMain.handle('dialog:folder', async () => {
     const r = await dialog.showOpenDialog({ properties: ['openDirectory'] })
@@ -348,6 +445,32 @@ app.whenReady().then(() => {
   const pick = <T extends object>(base: T, from: any): T =>
     Object.fromEntries(Object.keys(base).map((k) => [k, from?.[k] ?? (base as any)[k]])) as T
   settings = { ...pick(defaults, saved), hotkeys: pick(defaults.hotkeys, saved.hotkeys) }
+  // версия 2: цена предмета переехала с F9 на F7 (меняем, только если клавишу не настраивали сами)
+  if ((saved.settingsVersion ?? 1) < 2) {
+    if (settings.hotkeys.price === 'F9') settings.hotkeys.price = 'F7'
+    settings.settingsVersion = 2
+    writeJson('settings.json', settings)
+  }
+  // раньше режимов было два (regular / pve) — теперь три персонажа
+  if ((settings.gameMode as string) === 'regular') settings.gameMode = 'pvp'
+  // открываем того персонажа, что был в прошлый раз (логи уточнят через секунду)
+  const lastProfile = readJson<{ profile: Profile }>('last-profile.json', { profile: 'pvp' }).profile
+  profile = settings.gameMode === 'auto' ? (['pvp', 'season', 'pve'].includes(lastProfile) ? lastProfile : 'pvp') : settings.gameMode
+  // первое разделение: квесты сезона и PvE восстанавливаем из логов игры, PvP получает прежний общий прогресс
+  const firstSplit = !existsSync(join(app.getPath('userData'), progressFile('pvp')))
+  progress = loadProgress(profile)
+  live.profile = profile
+  if (firstSplit) {
+    writeJson(progressFile('pvp'), loadProgress('pvp'))
+    try {
+      const found = logs.importAll()
+      for (const p of ['season', 'pve'] as Profile[]) for (const [id, st] of found[p]) setTaskFor(p, id, st)
+    } catch (e) {
+      console.warn('Не удалось разобрать логи при разделении прогресса:', e)
+    }
+  }
+  // убранные виды карты («Классика», «Хаки», «Тёмная») заменяем «Схемой»
+  if (settings.mapStyle !== 'scheme' && settings.mapStyle !== 'detailed') settings.mapStyle = 'scheme'
   // игру переустановили или настройки перенесли с другого компьютера — ищем папку заново
   if (!existsSync(settings.gamePath)) {
     const found = detectGamePath()

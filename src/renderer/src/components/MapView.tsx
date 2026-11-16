@@ -64,6 +64,14 @@ const EXIT = (fill: string) =>
 const icon = (html: string, size: [number, number], anchor: [number, number]) =>
   L.divIcon({ className: 'map-icon', html, iconSize: size, iconAnchor: anchor })
 
+// спаун ЧВК: маленький кружок с силуэтом бойца
+const SPAWN_ICON = L.divIcon({
+  className: 'map-icon spawn-icon',
+  html: `<svg viewBox="0 0 16 16" width="16" height="16"><circle cx="8" cy="8" r="7" fill="#c45b42" stroke="#0a0f0c" stroke-width="1.3"/><circle cx="8" cy="5.7" r="2.1" fill="#fff"/><path d="M4.4 12.3c.5-2.3 1.9-3.5 3.6-3.5s3.1 1.2 3.6 3.5z" fill="#fff"/></svg>`,
+  iconSize: [16, 16],
+  iconAnchor: [8, 8]
+})
+
 const ICONS: Record<MapMarker['kind'], L.DivIcon> = {
   quest: icon(PIN('#c4a665', 28, 36), [28, 36], [14, 35]),
   'quest-selected': icon(PIN('#ff9d3c', 36, 46), [36, 46], [18, 45]),
@@ -89,6 +97,7 @@ interface Props {
   style: MapStyle
   layer: string | null // активный этаж; null — основной уровень
   labels?: MapLabel[] // подписи районов поверх карты
+  spawns?: Point3[] // спауны ЧВК — видны только на приближенной карте
   onMarkerClick?: (marker: MapMarker) => void
 }
 
@@ -105,12 +114,14 @@ export function loadSvg(path: string): Promise<string> {
   return p
 }
 
-export function MapView({ map, markers, position, focus, style, layer, labels, onMarkerClick }: Props) {
+export function MapView({ map, markers, position, focus, style, layer, labels, spawns, onMarkerClick }: Props) {
   const el = useRef<HTMLDivElement>(null)
   const lmap = useRef<L.Map | null>(null)
   const markerLayer = useRef<L.LayerGroup | null>(null)
   const playerLayer = useRef<L.LayerGroup | null>(null)
   const labelLayer = useRef<L.LayerGroup | null>(null)
+  const spawnLayer = useRef<L.LayerGroup | null>(null)
+  const fitZoom = useRef(0) // масштаб, при котором карта видна целиком
   const declutterRef = useRef<() => void>(() => {}) // перераскладка подписей, когда меняются значки
   const svgRef = useRef<SVGElement | null>(null) // векторная подложка (все этажи внутри)
   const baseTiles = useRef<L.TileLayer | null>(null)
@@ -132,6 +143,7 @@ export function MapView({ map, markers, position, focus, style, layer, labels, o
     const bounds = mapBounds(map)
     if (bounds) m.fitBounds(bounds)
     else m.setView([0, 0], 2)
+    fitZoom.current = m.getZoom()
 
     let cancelled = false
     svgRef.current = null
@@ -157,6 +169,7 @@ export function MapView({ map, markers, position, focus, style, layer, labels, o
     }
 
     labelLayer.current = L.layerGroup().addTo(m)
+    spawnLayer.current = L.layerGroup().addTo(m)
     markerLayer.current = L.layerGroup().addTo(m)
     playerLayer.current = L.layerGroup().addTo(m)
     lmap.current = m
@@ -212,7 +225,8 @@ export function MapView({ map, markers, position, focus, style, layer, labels, o
     const declutter = () => {
       // значки на карте и постоянные таблички выходов — подписи их не перекрывают
       const obstacles = [
-        ...m.getPane('markerPane')!.querySelectorAll(':scope > :not(.map-label)'),
+        // маленькие значки спаунов подписи не сдвигают — иначе при приближении пропадёт половина подписей
+        ...m.getPane('markerPane')!.querySelectorAll(':scope > :not(.map-label):not(.spawn-icon)'),
         ...m.getPane('tooltipPane')!.children
       ].map((e) => e.getBoundingClientRect())
       const taken: DOMRect[] = []
@@ -235,6 +249,30 @@ export function MapView({ map, markers, position, focus, style, layer, labels, o
       declutterRef.current = () => {}
     }
   }, [labels, map, baseReady])
+
+  // спауны ЧВК: маленькие значки, видны только на приближенной карте — на общем виде их прячем,
+  // чтобы не загромождать карту. Спауны с другого этажа приглушены, как и остальные точки
+  useEffect(() => {
+    const m = lmap.current
+    const group = spawnLayer.current
+    if (!m || !group) return
+    group.clearLayers()
+    const active = layers.some((l) => l.name === layer) ? layer : null
+    for (const p of spawns ?? []) {
+      const other = layerOfPoint(layers, p) !== active
+      const marker = L.marker(toLatLng(p), { icon: SPAWN_ICON, keyboard: false, opacity: other ? 0.4 : 1, zIndexOffset: -1000 })
+      marker.bindTooltip('Спаун ЧВК', { className: 'mk-tip mk-tip-exit', direction: 'top', offset: [0, -8] })
+      group.addLayer(marker)
+    }
+    const el = m.getContainer()
+    // общий вид — масштаб «карта целиком»; одно нажатие «+» — и спауны появляются
+    const update = () => el.classList.toggle('spawns-hidden', m.getZoom() < fitZoom.current + 0.99)
+    update()
+    m.on('zoomend', update)
+    return () => {
+      m.off('zoomend', update)
+    }
+  }, [spawns, map, layer, tiles]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // этаж: показываем его слой поверх основного уровня, основной приглушаем
   useEffect(() => {

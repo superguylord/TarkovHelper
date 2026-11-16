@@ -1,4 +1,5 @@
 import type { Hotkeys, Settings } from '@shared/types'
+import { PROFILE_LABEL } from '@shared/types'
 import type { AppState } from '../useAppState'
 
 const HOTKEY_LABELS: [keyof Hotkeys, string][] = [
@@ -52,10 +53,11 @@ export function SettingsPage({ s }: { s: AppState }) {
           Убирать скриншоты из игры в Корзину после того, как позиция прочитана
         </label>
         <label className="field">
-          <span>Режим игры (влияет на цены и квесты)</span>
+          <span>Персонаж (у каждого свои квесты, убежище и уровень)</span>
           <select value={settings.gameMode} onChange={(e) => set({ gameMode: e.target.value as Settings['gameMode'] })}>
-            <option value="auto">Автоматически по логам{live?.detectedMode ? ` (сейчас ${live.detectedMode === 'pve' ? 'PvE' : 'PvP'})` : ''}</option>
-            <option value="regular">PvP</option>
+            <option value="auto">Автоматически по логам{live?.detectedMode ? ` (сейчас ${PROFILE_LABEL[live.detectedMode]})` : ''}</option>
+            <option value="pvp">PvP</option>
+            <option value="season">PvP Сезон</option>
             <option value="pve">PvE</option>
           </select>
         </label>
@@ -67,6 +69,9 @@ export function SettingsPage({ s }: { s: AppState }) {
           Формат Electron: <code>F8</code>, <code>Alt+M</code>, <code>Ctrl+Shift+P</code>. Клавиша перестаёт работать в игре, пока
           TarkovHelper запущен. Игра должна быть в режиме «Оконный без рамки», иначе оверлей не виден.
         </p>
+        {(live?.hotkeyProblems?.length ?? 0) > 0 && (
+          <p className="hotkey-warn">Не работает: {live!.hotkeyProblems.join('; ')}. Выберите другую клавишу.</p>
+        )}
         {HOTKEY_LABELS.map(([k, label]) => (
           <label key={k} className="field inline">
             <span>{label}</span>

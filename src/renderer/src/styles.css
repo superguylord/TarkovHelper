@@ -212,6 +212,9 @@ input:focus, select:focus { border-color: var(--brass); }
 
 .map-icon { background: none; border: none; }
 .map-icon svg { display: block; filter: drop-shadow(0 2px 3px rgba(0, 0, 0, 0.6)); cursor: pointer; }
+/* спауны ЧВК: на общем виде карты прячем, появляются при приближении */
+.spawn-icon svg { filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.6)); cursor: default; }
+.spawns-hidden .spawn-icon { display: none; }
 .zone { stroke-width: 1.5; fill-opacity: 0.12; }
 .zone-quest { stroke: var(--brass); fill: var(--brass); }
 .zone-quest-selected { stroke: #ff9d3c; fill: #ff9d3c; fill-opacity: 0.22; stroke-width: 2.5; }
@@ -484,10 +487,7 @@ input:focus, select:focus { border-color: var(--brass); }
 .tp-flea .down { color: var(--brass); }
 
 /* ---------- стили карты и этажи ---------- */
-.map.style-khaki .leaflet-tile-pane { filter: grayscale(1) sepia(0.6) saturate(0.75) hue-rotate(8deg) brightness(0.62) contrast(1.25); }
-.map.style-night .leaflet-tile-pane { filter: saturate(0.55) hue-rotate(-12deg) brightness(0.55) contrast(1.35); }
 .map.style-detailed .leaflet-tile-pane { filter: saturate(0.85) brightness(0.92); }
-.map.style-night { background: #090b0c; }
 /* «Схема» — свои цвета внутри SVG (см. mapPalette.ts), фон — в тон земле */
 .map.style-scheme { background: #151816; }
 
@@ -611,7 +611,68 @@ input:focus, select:focus { border-color: var(--brass); }
 .needs .cube-grid { grid-template-columns: repeat(auto-fill, minmax(84px, 1fr)); }
 .tag-green-strong { color: #b6c58a; border-color: #6b7a45; }
 
+.hotkey-warn { margin: 0 0 8px; color: var(--danger); font-size: 13px; }
+
+/* ---------- брифинг: боссы, покупки ---------- */
+.boss-away { opacity: 0.55; }
+.bosses { flex: 1; min-width: 0; padding: 0 12px; }
+.bosses .eyebrow { margin: 0 0 6px; }
+.boss-list { display: flex; flex-wrap: wrap; gap: 6px; }
+.boss { padding: 3px 9px; background: var(--panel-2); border: 1px solid var(--line-strong); border-radius: 999px; font-size: 12.5px; white-space: nowrap; }
+.boss b { color: var(--brass-strong); font-variant-numeric: tabular-nums; }
+.my-traders { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; margin: 12px 0 4px; padding-top: 10px; border-top: 1px solid var(--line); }
+.trader-lvl { display: inline-flex; align-items: center; gap: 5px; font-size: 12.5px; color: var(--text-muted); }
+.trader-lvl input { width: 52px; padding: 1px 4px; background: var(--panel-2); color: var(--text); border: 1px solid var(--line-strong); border-radius: 5px; font: inherit; }
+.trader-lvl select { padding: 1px 2px; background: var(--panel-2); color: var(--text); border: 1px solid var(--line-strong); border-radius: 5px; font: inherit; }
+.bring-source { margin-top: 2px; font-size: 12px; color: var(--green); }
+.blocked { margin: 12px 0; }
+.blocked-quest { padding: 8px 10px; margin-top: 6px; background: var(--panel-2); border: 1px dashed var(--line-strong); border-radius: var(--radius-sm); }
+.blocked-item { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 4px; font-size: 12.5px; }
+.btn-small { padding: 3px 9px; font-size: 12px; white-space: nowrap; }
+
+/* ---------- сюжет ---------- */
+.story { display: grid; grid-template-columns: 400px 1fr; height: 100%; min-height: 0; }
+.story-side { padding: 16px 18px; border-right: 1px solid var(--line); overflow: auto; background: var(--bg-elevated); }
+.story-guide { padding: 4px 28px 28px; overflow: auto; }
+.story-guide h2 { font-family: var(--font-display); font-weight: 500; letter-spacing: 0.5px; margin: 16px 0 4px; }
+.endings { display: flex; flex-direction: column; gap: 4px; margin-bottom: 14px; }
+.ending {
+  padding: 8px 10px; text-align: left; cursor: pointer; font: inherit; font-size: 13px; color: var(--text-muted);
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius-sm);
+}
+.ending:hover { color: var(--text); border-color: var(--line-strong); }
+.ending.active { color: var(--text); border-color: var(--brass); background: var(--panel-3); box-shadow: inset 3px 0 0 var(--brass); }
+.story-node { display: flex; align-items: center; gap: 8px; margin-top: 4px; }
+.story-node input { accent-color: var(--brass); flex-shrink: 0; }
+.story-node button {
+  flex: 1; min-width: 0; padding: 7px 10px; text-align: left; cursor: pointer; font: inherit; font-size: 13px; font-weight: 600; color: var(--text);
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius-sm);
+}
+.story-node button:hover { background: var(--panel-2); }
+.story-node.active button { border-color: var(--brass); background: var(--panel-3); }
+.story-node.on-path button { border-left: 3px solid var(--brass); }
+.story-node.dim { opacity: 0.45; }
+.story-node.done button { color: var(--text-dim); text-decoration: line-through; }
+.story-goals { margin: 6px 0 12px; padding-left: 18px; color: var(--text-muted); font-size: 13px; }
+
 /* ---------- обновления ---------- */
 .update-note { padding: 0 4px; }
+/* сигнал в меню: вышла новая версия */
+.update-alert {
+  display: flex; align-items: center; gap: 10px; width: 100%; margin-top: 12px; padding: 9px 11px; text-align: left;
+  font: inherit; color: var(--text); background: rgba(196, 166, 101, 0.12);
+  border: 1px solid var(--brass); border-radius: var(--radius-sm);
+}
+.update-alert.ready { cursor: pointer; }
+.update-alert.ready:hover { background: rgba(196, 166, 101, 0.22); }
+.update-alert b { display: block; font-size: 13px; }
+.update-alert small { display: block; font-size: 11.5px; color: var(--text-muted); }
+.update-dot { width: 9px; height: 9px; flex-shrink: 0; border-radius: 50%; background: var(--brass-strong); animation: update-pulse 1.6s ease-out infinite; }
+@keyframes update-pulse {
+  0% { box-shadow: 0 0 0 0 rgba(223, 189, 112, 0.7); }
+  100% { box-shadow: 0 0 0 9px rgba(223, 189, 112, 0); }
+}
+@media (prefers-reduced-motion: reduce) { .update-dot { animation: none; } }
+.side-profile { margin-left: 8px; padding: 1px 6px; border: 1px solid var(--line-strong); border-radius: 999px; font-size: 9.5px; letter-spacing: 0.5px; color: var(--brass-strong); }
 .row-buttons { display: flex; gap: 8px; flex-wrap: wrap; }
 

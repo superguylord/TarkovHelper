@@ -35,7 +35,10 @@ export function OverlayApp() {
           {price.item && data ? (
             <PriceCard item={price.item} data={data} progress={s.progress} />
           ) : (
-            <div className="empty">Не удалось распознать предмет</div>
+            <div className="empty">
+              Предмет не распознан. Наведите курсор на предмет и дождитесь подсказки с названием.
+              {price.text && <div className="muted small">Прочитано: «{price.text.replace(/\s+/g, ' ').slice(0, 90)}»</div>}
+            </div>
           )}
         </div>
       )}

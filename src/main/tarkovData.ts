@@ -7,8 +7,10 @@ import type {
   HideoutStation,
   Item,
   MapInfo,
+  MapBoss,
   MapLayer,
   MapPoint,
+  Point3,
   Task,
   TraderInfo
 } from '@shared/types'
@@ -425,10 +427,48 @@ function buildMaps(
       coordinateRotation: g.coordinateRotation ?? 0,
       bounds: g.bounds ?? [],
       svgBounds: g.svgBounds,
-      extracts
+      extracts,
+      spawns: pmcSpawns(main.spawns),
+      bosses: mapBosses(main.bosses, data.mobs ?? {}, ru)
     })
   }
   return { maps, mapIdToName }
+}
+
+// в данных у Кочевников записан только Knight, у сектантов — жрец
+const BOSS_NAMES: Dict = { bossKnight: 'Кочевники', sectantPriest: 'Сектанты' }
+
+/** Боссы локации: один босс — одна строка с наибольшим шансом. Рейдеров, отступников и заражённых не берём. */
+function mapBosses(bosses: any[] = [], mobs: Record<string, any>, ru: Dict): MapBoss[] {
+  const out = new Map<string, MapBoss>()
+  for (const b of bosses) {
+    const id = String(b.mob ?? '')
+    if (!/^boss/.test(id) && id !== 'sectantPriest') continue
+    const name = BOSS_NAMES[id] ?? tr(ru, mobs[id]?.name ?? id)
+    // названия мест оставляем только переведённые — остальное в данных служебные коды зон
+    const zones: string[] = (b.spawnLocations ?? []).map((l: any) => tr(ru, l.name)).filter((z: string) => /[а-яё]/i.test(z))
+    const cur = out.get(name) ?? { name, chance: 0, zones: [] }
+    cur.chance = Math.max(cur.chance, b.spawnChance ?? 0)
+    for (const z of zones) if (!cur.zones.includes(z)) cur.zones.push(z)
+    out.set(name, cur)
+  }
+  return [...out.values()].filter((b) => b.chance > 0).sort((a, b) => b.chance - a.chance)
+}
+
+/**
+ * Спауны ЧВК: точки появления игрока на стороне ЧВК (или «все»). В одном месте спауна бывает
+ * несколько точек в паре метров друг от друга — сливаем точки ближе 10 м (и в пределах 3 м по высоте).
+ */
+function pmcSpawns(spawns: any[] = []): Point3[] {
+  const out: Point3[] = []
+  for (const s of spawns) {
+    const p = s.position
+    if (!p || !s.categories?.includes('player')) continue
+    if (!s.sides?.some((side: string) => side === 'pmc' || side === 'all')) continue
+    if (out.some((q) => Math.hypot(q.x - p.x, q.z - p.z) < 10 && Math.abs(q.y - p.y) < 3)) continue
+    out.push({ x: p.x, y: p.y, z: p.z })
+  }
+  return out
 }
 
 const ROUBLES = '5449016a4bdc2d6f028b456f'
@@ -517,6 +557,9 @@ function toTask(t: any, ru: Dict, traders: Dict, mapName: Dict, name: (id: strin
     map: t.map ? (mapName[t.map] ?? null) : null,
     minPlayerLevel: t.minPlayerLevel ?? 0,
     kappaRequired: !!t.kappaRequired,
+    traderLevels: (t.traderRequirements ?? [])
+      .filter((r: any) => r.requirementType === 'level' && r.compareMethod === '>=' && traders[r.trader])
+      .map((r: any) => ({ trader: traders[r.trader], level: r.value })),
     wikiLink: t.wikiLink ?? '',
     requires: (t.taskRequirements ?? []).map((r: any) => ({ taskId: r.task, status: r.status ?? [] })),
     neededKeys: (t.neededKeys ?? []).map((k: any) => ({ map: mapName[k.map] ?? null, keys: (k.keys ?? []).map(name) })),
@@ -632,7 +675,7 @@ function itemsUsedInTasks(tasks: any[]): Map<string, string[]> {
 // версия в имени: при смене формата данных старый кэш просто не читается
 const cacheName = (mode: GameMode) => `gamedata-v${CACHE_VERSION}-${mode}.json`
 
-const CACHE_VERSION = 11
+const CACHE_VERSION = 14
 
 export function loadCached(mode: GameMode): GameData | null {
   for (let v = CACHE_VERSION; v >= 2; v--) {

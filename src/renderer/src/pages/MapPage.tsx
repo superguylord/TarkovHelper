@@ -9,13 +9,14 @@ import { MAP_STYLES, availableLayers, layerOfPoint } from '../mapLayers'
 const LAYER_TOGGLES = [
   ['quests', 'Квесты'],
   ['extracts', 'Выходы'],
-  ['labels', 'Названия']
+  ['labels', 'Названия'],
+  ['spawns', 'Спауны']
 ] as const
 
 export function MapPage({ s, nav }: { s: AppState; nav: Nav }) {
   const { data, live, progress } = s
   const [selected, setSelected] = useState<string | null>(null)
-  const [opts, setOpts] = useState({ quests: true, extracts: true, labels: true })
+  const [opts, setOpts] = useState({ quests: true, extracts: true, labels: true, spawns: true })
   const [faction, setFaction] = useState<Faction>(loadFaction)
   const [taskId, setTaskId] = useState<string | null>(null) // квест, подсвеченный на карте
   const [pageTaskId, setPageTaskId] = useState<string | null>(null) // квест, открытый на отдельной странице
@@ -164,7 +165,7 @@ export function MapPage({ s, nav }: { s: AppState; nav: Nav }) {
         </div>
 
         <div className="eyebrow">Вид карты</div>
-        <div className="seg seg-small seg-wrap">
+        <div className="seg seg-small">
           {MAP_STYLES.map(([key, label]) => (
             <button key={key} className={style === key ? 'active' : ''} onClick={() => window.api.setSettings({ mapStyle: key })}>
               {label}
@@ -191,6 +192,7 @@ export function MapPage({ s, nav }: { s: AppState; nav: Nav }) {
           style={style}
           layer={floor}
           labels={opts.labels ? map.labels : undefined}
+          spawns={opts.spawns ? map.spawns : undefined}
           onMarkerClick={onMarkerClick}
         />
         {floors.length > 0 && (

@@ -1,6 +1,6 @@
 import { closeSync, existsSync, openSync, readdirSync, readSync, statSync } from 'node:fs'
 import { join } from 'node:path'
-import type { GameMode, TaskStatus } from '@shared/types'
+import type { Profile, TaskStatus } from '@shared/types'
 
 // Читает логи игры (<папка игры>/Logs/log_*/...) и сообщает о событиях.
 // Память игры не трогаем — только текстовые файлы, которые игра пишет сама.
@@ -8,8 +8,8 @@ import type { GameMode, TaskStatus } from '@shared/types'
 export interface LogEvents {
   onMap(nameId: string): void
   onRaid(inRaid: boolean): void
-  onMode(mode: GameMode): void
-  onTask(taskId: string, status: TaskStatus): void
+  onMode(profile: Profile): void
+  onTask(taskId: string, status: TaskStatus, profile: Profile): void
   onStatus(text: string): void
 }
 
@@ -17,26 +17,59 @@ export interface LogEvents {
 const TASK_MESSAGE: Record<number, TaskStatus> = { 10: 'active', 11: 'failed', 12: 'completed' }
 
 const LOCATION_RE = /TRACE-NetworkGameCreate profileStatus:.*Location: ([^,]+),/
-const MODE_RE = /https?:\/\/gw-(pvp|pve)\./
+// Персонаж виден по серверу, к которому обращается игра: gw-pvp, gw-pvp-season или gw-pve.
+// Запрос /client/game/mode игра всегда шлёт на gw-pvp ещё до выбора персонажа — его не считаем.
+const HOST_RE = /^(\d{4}-\d\d-\d\d \d\d:\d\d:\d\d\.\d+)\|.*?https?:\/\/gw-(pvp-season|pvp|pve)\.[^\s,]*/gm
+const HOST_PROFILE: Record<string, Profile> = { pvp: 'pvp', 'pvp-season': 'season', pve: 'pve' }
+
+/** Когда игра переключалась между персонажами: [время строки лога, персонаж], по порядку. */
+type Switches = [string, Profile][]
+
+function readSwitches(text: string, into: Switches): void {
+  for (const m of text.matchAll(HOST_RE)) {
+    if (m[0].includes('/client/game/mode')) continue
+    const p = HOST_PROFILE[m[2]]
+    if (into[into.length - 1]?.[1] !== p) into.push([m[1], p])
+  }
+}
+
+/** Какой персонаж был активен в момент ts (время в логах сравнивается как строки). */
+function profileAt(switches: Switches, ts: string): Profile {
+  let cur: Profile = switches[0]?.[1] ?? 'pvp'
+  for (const [at, p] of switches) {
+    if (at > ts) break
+    cur = p
+  }
+  return cur
+}
 
 function logDirs(gamePath: string): string[] {
   const root = join(gamePath, 'Logs')
   if (!existsSync(root)) return []
+  // имена вида log_2026.11.05_9-56-21: час бывает без нуля впереди, поэтому сортируем по дополненному
+  const key = (d: string) => d.replace(/_(\d)-/, '_0$1-')
   return readdirSync(root)
     .filter((d) => d.startsWith('log_'))
-    .sort() // имена вида log_2026.11.05_20-11-13 сортируются по времени
+    .sort((a, b) => key(a).localeCompare(key(b)))
     .map((d) => join(root, d))
 }
 
-/** Разбирает уведомления о квестах в куске текста push-notifications-лога. */
-export function parseTaskEvents(text: string, onTask: LogEvents['onTask']): void {
-  // каждое уведомление — JSON-блок после строки "Got notification | ChatMessageReceived"
-  const re = /"type": (\d+),[^{}]*?"templateId": "([0-9a-f]{24})[ "]/g
+/**
+ * Разбирает уведомления о квестах в куске текста push-notifications-лога.
+ * Каждое уведомление — JSON-блок после строки со временем ("... Got notification | ChatMessageReceived").
+ * lastTs — время последней строки из прошлого куска; возвращает время последней строки этого.
+ */
+export function parseTaskEvents(text: string, onTask: (id: string, status: TaskStatus, ts: string) => void, lastTs = ''): string {
+  const re = /^(\d{4}-\d\d-\d\d \d\d:\d\d:\d\d\.\d+)\||"type": (\d+),[^{}]*?"templateId": "([0-9a-f]{24})[ "]/gm
   let m: RegExpExecArray | null
   while ((m = re.exec(text))) {
-    const status = TASK_MESSAGE[Number(m[1])]
-    if (status) onTask(m[2], status)
+    if (m[1]) lastTs = m[1]
+    else {
+      const status = TASK_MESSAGE[Number(m[2])]
+      if (status) onTask(m[3], status, lastTs)
+    }
   }
+  return lastTs
 }
 
 export class LogWatcher {
@@ -45,6 +78,8 @@ export class LogWatcher {
   private pending = new Map<string, string>() // недочитанный хвост файла без перевода строки
   private timer: NodeJS.Timeout | null = null
   private inRaid = false
+  private switches: Switches = [] // смены персонажа в текущей сессии игры
+  private pushTs = ''
 
   constructor(
     private gamePath: () => string,
@@ -62,13 +97,15 @@ export class LogWatcher {
     this.timer = null
   }
 
-  /** Проходит по всем сохранённым логам и возвращает итоговые статусы квестов. */
-  importAll(): Map<string, TaskStatus> {
-    const result = new Map<string, TaskStatus>()
+  /** Проходит по всем сохранённым логам и возвращает итоговые статусы квестов — отдельно для каждого персонажа. */
+  importAll(): Record<Profile, Map<string, TaskStatus>> {
+    const result: Record<Profile, Map<string, TaskStatus>> = { pvp: new Map(), season: new Map(), pve: new Map() }
     for (const dir of logDirs(this.gamePath())) {
-      for (const f of readdirSync(dir).filter((f) => f.includes('push-notifications'))) {
-        const text = readTail(join(dir, f), 0).text
-        parseTaskEvents(text, (id, st) => result.set(id, st))
+      const files = readdirSync(dir)
+      const switches: Switches = []
+      for (const f of files.filter((f) => f.includes('backend'))) readSwitches(readTail(join(dir, f), 0).text, switches)
+      for (const f of files.filter((f) => f.includes('push-notifications'))) {
+        parseTaskEvents(readTail(join(dir, f), 0).text, (id, st, ts) => result[profileAt(switches, ts)].set(id, st))
       }
     }
     return result
@@ -86,6 +123,8 @@ export class LogWatcher {
       this.dir = latest
       this.offsets.clear()
       this.pending.clear()
+      this.switches = []
+      this.pushTs = ''
       this.ev.onStatus(`Слежу за логами: ${latest.split(/[\\/]/).pop()}`)
     }
     let files: string[]
@@ -118,12 +157,14 @@ export class LogWatcher {
 
   private handle(kind: 'app' | 'push' | 'backend', text: string): void {
     if (kind === 'push') {
-      parseTaskEvents(text, this.ev.onTask)
+      // квест относится к персонажу, который был активен в момент уведомления (backend-лог читается раньше)
+      this.pushTs = parseTaskEvents(text, (id, st, ts) => this.ev.onTask(id, st, profileAt(this.switches, ts)), this.pushTs)
       return
     }
     if (kind === 'backend') {
-      const m = MODE_RE.exec(text)
-      if (m) this.ev.onMode(m[1] === 'pve' ? 'pve' : 'regular')
+      const before = this.switches.length
+      readSwitches(text, this.switches)
+      if (this.switches.length > before) this.ev.onMode(this.switches[this.switches.length - 1][1])
       return
     }
     for (const line of text.split('\n')) {

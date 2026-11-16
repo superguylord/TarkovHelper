@@ -1,4 +1,4 @@
-import type { QuestGuide } from '@shared/types'
+import type { QuestGuide, StoryNode } from '@shared/types'
 import { readJson, writeJson } from './store'
 import { httpFetch } from './http'
 import { similarity } from './similarity'
@@ -74,17 +74,21 @@ function findSlug(idx: Index, taskName: string): string | null {
   return best?.[1] ?? null
 }
 
-export async function getGuide(taskName: string): Promise<QuestGuide | null> {
+/** Гайд по названию квеста; если известен адрес страницы (slug, как у глав сюжета) — сразу по нему. */
+export async function getGuide(taskName: string, knownSlug?: string): Promise<QuestGuide | null> {
   guides ??= readJson<Guides>(GUIDES_FILE, {})
   const hit = guides[taskName]
   if (hit && Date.now() - hit.at < GUIDE_DAYS * 86400_000) return hit.guide
 
-  let idx = await loadIndex()
-  let slug = findSlug(idx, taskName)
-  // квест мог появиться на сайте недавно — один раз обновляем список (не чаще раза в час)
-  if (!slug && Date.now() - idx.at > 3600_000) {
-    idx = await loadIndex(true)
+  let slug: string | null = knownSlug ?? null
+  if (!slug) {
+    let idx = await loadIndex()
     slug = findSlug(idx, taskName)
+    // квест мог появиться на сайте недавно — один раз обновляем список (не чаще раза в час)
+    if (!slug && Date.now() - idx.at > 3600_000) {
+      idx = await loadIndex(true)
+      slug = findSlug(idx, taskName)
+    }
   }
   let guide: QuestGuide | null = null
   if (slug) {
@@ -96,4 +100,54 @@ export async function getGuide(taskName: string): Promise<QuestGuide | null> {
   guides[taskName] = { at: Date.now(), guide }
   writeJson(GUIDES_FILE, guides)
   return guide
+}
+
+// ---------- сюжет ----------
+
+const STORY_FILE = 'tarkovhelp-story.json'
+type StoryCache = { at: number; nodes: StoryNode[] }
+let story: StoryCache | null = null
+
+/**
+ * Главы сюжета: список — со страницы «Сюжет», связи между главами — из их API
+ * (parent_quest / next_quest). Кэш на 3 дня; если сайт недоступен — отдаём прошлый кэш.
+ */
+export async function getStory(): Promise<StoryNode[]> {
+  story ??= readJson<StoryCache>(STORY_FILE, { at: 0, nodes: [] })
+  if (story.nodes.length && Date.now() - story.at < INDEX_DAYS * 86400_000) return story.nodes
+  try {
+    const page = await httpFetch(`${SITE}/ru/trader/storyteller/quests`, { headers: HEADERS })
+    if (!page.ok) throw new Error(`tarkov.help: HTTP ${page.status}`)
+    const html = await page.text()
+    const slugs = [...new Set([...html.matchAll(/href="\/ru\/quest\/([^"]+)"/g)].map((m) => m[1]))]
+    if (!slugs.length) throw new Error('tarkov.help: список сюжетных глав пуст')
+    const raw = await Promise.all(
+      slugs.map((slug) =>
+        httpFetch(`${SITE}/api/ru/quests/${encodeURIComponent(slug)}`, { headers: HEADERS })
+          .then((r) => (r.ok ? r.json() : null))
+          .then((j) => j?.data ?? j)
+          .catch(() => null)
+      )
+    )
+    const known = new Set(slugs)
+    const links = (list: any): string[] => (Array.isArray(list) ? list.map((x) => String(x.seo_link)).filter((s) => known.has(s)) : [])
+    const nodes: StoryNode[] = []
+    raw.forEach((q, i) => {
+      if (!q?.name) return
+      nodes.push({
+        slug: slugs[i],
+        name: decode(String(q.name)),
+        parents: links(q.parent_quest),
+        next: links(q.next_quest),
+        goals: Array.isArray(q.goal) ? q.goal.map((g: any) => decode(String(g.name ?? ''))).filter(Boolean) : [],
+        url: `${SITE}/ru/quest/${slugs[i]}`
+      })
+    })
+    if (!nodes.length) throw new Error('tarkov.help: главы сюжета не загрузились')
+    story = { at: Date.now(), nodes }
+    writeJson(STORY_FILE, story)
+  } catch (e) {
+    if (!story.nodes.length) throw e
+  }
+  return story.nodes
 }
