@@ -65,6 +65,33 @@ const icon = (html: string, size: [number, number], anchor: [number, number]) =>
   L.divIcon({ className: 'map-icon', html, iconSize: size, iconAnchor: anchor })
 
 // спаун ЧВК: маленький кружок с силуэтом бойца
+/** Мелкая отметка на карте: замок с ключом или редкий лут. Как и спауны, видна на приближенной карте. */
+export interface MapPoi {
+  point: Point3
+  kind: 'key' | 'key-quest' | 'container' | 'loot' | 'injector'
+  label: string
+  detail?: string
+}
+
+// значки: кружок с рисунком внутри — ключ (синий; жёлтый — нужен для взятого квеста), сейф, драгоценность
+const KEY_GLYPH = (c: string) =>
+  `<circle cx="6.8" cy="9" r="2.4" fill="none" stroke="${c}" stroke-width="1.6"/><path d="M9.2 9h4.9M12.4 9v1.9M14.1 9v2.4" fill="none" stroke="${c}" stroke-width="1.6" stroke-linecap="round"/>`
+const POI_SVG = (fill: string, glyph: string) =>
+  `<svg viewBox="0 0 18 18" width="18" height="18"><circle cx="9" cy="9" r="8" fill="${fill}" stroke="#0a0f0c" stroke-width="1.3"/>${glyph}</svg>`
+const poiIcon = (html: string) => L.divIcon({ className: 'map-icon poi-icon', html, iconSize: [18, 18], iconAnchor: [9, 9] })
+const POI_ICONS: Record<MapPoi['kind'], L.DivIcon> = {
+  key: poiIcon(POI_SVG('#4f93c4', KEY_GLYPH('#fff'))),
+  'key-quest': poiIcon(POI_SVG('#d9b45a', KEY_GLYPH('#0a0f0c'))),
+  container: poiIcon(
+    POI_SVG('#c9853f', '<rect x="5" y="5" width="8" height="8" rx="1.2" fill="none" stroke="#fff" stroke-width="1.5"/><circle cx="9" cy="9" r="1.6" fill="none" stroke="#fff" stroke-width="1.4"/>')
+  ),
+  loot: poiIcon(POI_SVG('#b65fae', '<path d="M9 4.6l3.8 3.6L9 13.6 5.2 8.2z" fill="#fff"/>')),
+  // шприц
+  injector: poiIcon(
+    POI_SVG('#2f9e8f', '<path d="M5.4 12.6l5.6-5.6M10.1 5.1l2.8 2.8M12.6 4.2l1.2 1.2M7.3 9.5l1.2 1.2" fill="none" stroke="#fff" stroke-width="1.7" stroke-linecap="round"/>')
+  )
+}
+
 const SPAWN_ICON = L.divIcon({
   className: 'map-icon spawn-icon',
   html: `<svg viewBox="0 0 16 16" width="16" height="16"><circle cx="8" cy="8" r="7" fill="#c45b42" stroke="#0a0f0c" stroke-width="1.3"/><circle cx="8" cy="5.7" r="2.1" fill="#fff"/><path d="M4.4 12.3c.5-2.3 1.9-3.5 3.6-3.5s3.1 1.2 3.6 3.5z" fill="#fff"/></svg>`,
@@ -98,6 +125,7 @@ interface Props {
   layer: string | null // активный этаж; null — основной уровень
   labels?: MapLabel[] // подписи районов поверх карты
   spawns?: Point3[] // спауны ЧВК — видны только на приближенной карте
+  pois?: MapPoi[] // ключи и редкий лут — тоже только на приближенной карте
   onMarkerClick?: (marker: MapMarker) => void
 }
 
@@ -114,13 +142,14 @@ export function loadSvg(path: string): Promise<string> {
   return p
 }
 
-export function MapView({ map, markers, position, focus, style, layer, labels, spawns, onMarkerClick }: Props) {
+export function MapView({ map, markers, position, focus, style, layer, labels, spawns, pois, onMarkerClick }: Props) {
   const el = useRef<HTMLDivElement>(null)
   const lmap = useRef<L.Map | null>(null)
   const markerLayer = useRef<L.LayerGroup | null>(null)
   const playerLayer = useRef<L.LayerGroup | null>(null)
   const labelLayer = useRef<L.LayerGroup | null>(null)
   const spawnLayer = useRef<L.LayerGroup | null>(null)
+  const poiLayer = useRef<L.LayerGroup | null>(null)
   const fitZoom = useRef(0) // масштаб, при котором карта видна целиком
   const declutterRef = useRef<() => void>(() => {}) // перераскладка подписей, когда меняются значки
   const svgRef = useRef<SVGElement | null>(null) // векторная подложка (все этажи внутри)
@@ -170,6 +199,7 @@ export function MapView({ map, markers, position, focus, style, layer, labels, s
 
     labelLayer.current = L.layerGroup().addTo(m)
     spawnLayer.current = L.layerGroup().addTo(m)
+    poiLayer.current = L.layerGroup().addTo(m)
     markerLayer.current = L.layerGroup().addTo(m)
     playerLayer.current = L.layerGroup().addTo(m)
     lmap.current = m
@@ -181,7 +211,10 @@ export function MapView({ map, markers, position, focus, style, layer, labels, s
       m.remove()
       lmap.current = null
     }
-  }, [map, tiles])
+    // пересоздаём карту только при смене локации или подложки: обновление данных (цены раз в час,
+    // сезонные квесты) присылает тот же объект заново — из-за этого карта сбрасывала приближение
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [map.normalizedName, map.svgPath, map.tilePath, tiles])
 
   // свои цвета карты: стиль подмешивается внутрь SVG и перекрывает исходные классы
   useEffect(() => {
@@ -226,7 +259,7 @@ export function MapView({ map, markers, position, focus, style, layer, labels, s
       // значки на карте и постоянные таблички выходов — подписи их не перекрывают
       const obstacles = [
         // маленькие значки спаунов подписи не сдвигают — иначе при приближении пропадёт половина подписей
-        ...m.getPane('markerPane')!.querySelectorAll(':scope > :not(.map-label):not(.spawn-icon)'),
+        ...m.getPane('markerPane')!.querySelectorAll(':scope > :not(.map-label):not(.spawn-icon):not(.poi-icon)'),
         ...m.getPane('tooltipPane')!.children
       ].map((e) => e.getBoundingClientRect())
       const taken: DOMRect[] = []
@@ -273,6 +306,35 @@ export function MapView({ map, markers, position, focus, style, layer, labels, s
       m.off('zoomend', update)
     }
   }, [spawns, map, layer, tiles]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ключи и редкий лут: как спауны — на общем виде карты спрятаны, с другого этажа приглушены
+  useEffect(() => {
+    const m = lmap.current
+    const group = poiLayer.current
+    if (!m || !group) return
+    group.clearLayers()
+    const active = layers.some((l) => l.name === layer) ? layer : null
+    for (const p of pois ?? []) {
+      const other = layerOfPoint(layers, p.point) !== active
+      const marker = L.marker(toLatLng(p.point), {
+        icon: POI_ICONS[p.kind],
+        keyboard: false,
+        opacity: other ? 0.4 : 1,
+        // ключи для взятых квестов — поверх остальных мелких отметок
+        zIndexOffset: p.kind === 'key-quest' ? -500 : -900
+      })
+      const detail = p.detail ? `<br><small>${escapeHtml(p.detail)}</small>` : ''
+      marker.bindTooltip(`<b>${escapeHtml(p.label)}</b>${detail}`, { className: 'mk-tip mk-tip-exit', direction: 'top', offset: [0, -8] })
+      group.addLayer(marker)
+    }
+    const el = m.getContainer()
+    const update = () => el.classList.toggle('pois-hidden', m.getZoom() < fitZoom.current + 0.99)
+    update()
+    m.on('zoomend', update)
+    return () => {
+      m.off('zoomend', update)
+    }
+  }, [pois, map, layer, tiles]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // этаж: показываем его слой поверх основного уровня, основной приглушаем
   useEffect(() => {

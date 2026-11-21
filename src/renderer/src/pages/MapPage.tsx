@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { AppState } from '../useAppState'
-import { MapView, type MapMarker } from '../components/MapView'
+import { MapView, type MapMarker, type MapPoi } from '../components/MapView'
+import { questState } from '../questLogic'
+import type { MapLock, MapLoot } from '@shared/types'
 import { QuestPage } from './QuestPage'
 import { buildMarkers, loadFaction, questsOnMap, type Faction } from '../mapMarkers'
 import type { Nav } from '../MainApp'
@@ -10,13 +12,45 @@ const LAYER_TOGGLES = [
   ['quests', 'Квесты'],
   ['extracts', 'Выходы'],
   ['labels', 'Названия'],
-  ['spawns', 'Спауны']
+  ['spawns', 'Спауны'],
+  ['keys', 'Ключи'],
+  ['loot', 'Редкий лут'],
+  ['injectors', 'Инъекторы']
 ] as const
+
+type LayerOpts = Record<(typeof LAYER_TOGGLES)[number][0], boolean>
+const DEFAULT_LAYERS: LayerOpts = {
+  quests: true,
+  extracts: true,
+  labels: true,
+  spawns: true,
+  keys: true,
+  loot: true,
+  injectors: true
+}
+
+// категории лута: какая кнопка включает, как называется и какой значок, если в одной точке их несколько
+const LOOT_CATEGORIES = [
+  { kind: 'loose', layer: 'loot', poi: 'loot', title: 'Редкий лут' },
+  { kind: 'injector', layer: 'injectors', poi: 'injector', title: 'Инъекторы' }
+] as const
+// какие слои включены — помним между запусками
+function loadLayers(): LayerOpts {
+  try {
+    return { ...DEFAULT_LAYERS, ...JSON.parse(localStorage.getItem('mapLayers') ?? '{}') }
+  } catch {
+    return DEFAULT_LAYERS
+  }
+}
+
+const LOCK_KIND: Record<MapLock['kind'], string> = { door: 'дверь', trunk: 'багажник', container: 'контейнер' }
+const shortRub = (n: number) =>
+  n >= 1e6 ? `${(n / 1e6).toLocaleString('ru-RU', { maximumFractionDigits: 1 })} млн ₽` : `${Math.round(n / 1000)} тыс ₽`
 
 export function MapPage({ s, nav }: { s: AppState; nav: Nav }) {
   const { data, live, progress } = s
   const [selected, setSelected] = useState<string | null>(null)
-  const [opts, setOpts] = useState({ quests: true, extracts: true, labels: true, spawns: true })
+  const [opts, setOpts] = useState<LayerOpts>(loadLayers)
   const [faction, setFaction] = useState<Faction>(loadFaction)
   const [taskId, setTaskId] = useState<string | null>(null) // квест, подсвеченный на карте
   const [pageTaskId, setPageTaskId] = useState<string | null>(null) // квест, открытый на отдельной странице
@@ -37,6 +71,14 @@ export function MapPage({ s, nav }: { s: AppState; nav: Nav }) {
   useEffect(() => {
     if (live?.inRaid) setOpts((o) => ({ ...o, extracts: true }))
   }, [live?.inRaid])
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('mapLayers', JSON.stringify(opts))
+    } catch {
+      /* без сохранения — слои вернутся к обычным при следующем запуске */
+    }
+  }, [opts])
 
   useEffect(() => {
     try {
@@ -70,6 +112,67 @@ export function MapPage({ s, nav }: { s: AppState; nav: Nav }) {
     () => (data && map ? buildMarkers(data, map, progress, { ...opts, faction, selectedTask: taskId }) : []),
     [data, map, progress, opts, faction, taskId]
   )
+  // ключи (выделены — нужные для взятых квестов) и редкий лут
+  const pois = useMemo(() => {
+    if (!data || !map) return []
+    const items = new Map(data.items.map((i) => [i.id, i]))
+    const price = (id: string) => {
+      const it = items.get(id)
+      return it?.avg24hPrice ?? it?.lastLowPrice ?? null
+    }
+    const out: MapPoi[] = []
+    if (opts.keys) {
+      const questKeys = new Map<string, string[]>()
+      for (const t of data.tasks) {
+        if (questState(t, progress) !== 'active') continue
+        for (const k of t.neededKeys ?? []) {
+          if (k.map && k.map !== map.normalizedName) continue
+          for (const name of k.keys) questKeys.set(name, [...(questKeys.get(name) ?? []), t.name])
+        }
+      }
+      for (const l of map.locks ?? []) {
+        const quests = questKeys.get(l.keyName)
+        const p = price(l.key)
+        out.push({
+          point: l,
+          kind: quests ? 'key-quest' : 'key',
+          label: l.keyName,
+          detail: [
+            LOCK_KIND[l.kind],
+            l.power ? 'нужно включить электричество' : '',
+            p ? `~${shortRub(p)} на барахолке` : '',
+            quests ? `нужен для: ${quests.join(', ')}` : ''
+          ]
+            .filter(Boolean)
+            .join(' · ')
+        })
+      }
+    }
+    if (opts.loot) for (const x of map.loot ?? []) if (x.kind === 'container') out.push({ point: x, kind: 'container', label: x.name })
+    // рассыпной лут: в одной точке может быть и редкая находка, и инъектор — показываем одну
+    // отметку (значок — по первой категории) с общей подсказкой, чтобы значки не лежали друг на друге
+    const spots = new Map<string, { point: MapLoot; cats: { poi: MapPoi['kind']; title: string; items: string[] }[] }>()
+    for (const x of map.loot ?? []) {
+      const cat = LOOT_CATEGORIES.find((c) => c.kind === x.kind)
+      if (!cat || !opts[cat.layer]) continue
+      const key = `${x.x.toFixed(1)}:${x.y.toFixed(1)}:${x.z.toFixed(1)}`
+      const spot = spots.get(key) ?? { point: x, cats: [] }
+      spot.cats.push({ poi: cat.poi, title: cat.title, items: x.items })
+      spots.set(key, spot)
+    }
+    const order = LOOT_CATEGORIES.map((c) => c.poi as string)
+    for (const { point, cats } of spots.values()) {
+      cats.sort((a, b) => order.indexOf(a.poi) - order.indexOf(b.poi))
+      const ids = [...new Set(cats.flatMap((c) => c.items))]
+      const what = ids.map((id) => {
+        const p = price(id)
+        return `${items.get(id)?.name ?? id}${p ? ` ~${shortRub(p)}` : ''}`
+      })
+      out.push({ point, kind: cats[0].poi, label: cats.map((c) => c.title).join(' · '), detail: `Может лежать: ${what.join(', ')}` })
+    }
+    return out
+  }, [data, map, progress, opts.keys, opts.loot, opts.injectors])
+
   // приближаем к точкам выбранного квеста
   const focus = useMemo(
     () => (task && map ? task.objectives.flatMap((o) => o.points.filter((p) => p.map === map.normalizedName)) : null),
@@ -193,6 +296,7 @@ export function MapPage({ s, nav }: { s: AppState; nav: Nav }) {
           layer={floor}
           labels={opts.labels ? map.labels : undefined}
           spawns={opts.spawns ? map.spawns : undefined}
+          pois={pois}
           onMarkerClick={onMarkerClick}
         />
         {floors.length > 0 && (

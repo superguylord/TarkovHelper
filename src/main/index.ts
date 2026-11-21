@@ -1,8 +1,8 @@
 import { app, BrowserWindow, dialog, globalShortcut, ipcMain, screen, shell } from 'electron'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
-import type { GameData, GameMode, GoonsState, LiveState, OverlayMode, Profile, Progress, Settings, TaskStatus } from '@shared/types'
-import { dataMode } from '@shared/types'
+import type { GameData, GameMode, GoonsState, LiveState, OverlayMode, Profile, Progress, Settings, TaskStatus, RebuildPlan } from '@shared/types'
+import { FLEA_LEVEL, dataMode } from '@shared/types'
 import { readJson, writeJson } from './store'
 import { detectGamePath } from './gamePath'
 import { fetchGameData, loadCached } from './tarkovData'
@@ -11,6 +11,7 @@ import { ScreenshotWatcher } from './screenshotWatcher'
 import { scanPrice, warmUpOcr } from './priceScanner'
 import { searchItems } from './priceMatch'
 import { getGuide, getStory } from './tarkovHelp'
+import { getSeasonQuests, toSeasonTask, type SeasonQuest } from './seasonQuests'
 import { fetchGoons } from './goons'
 import { initUpdater } from './updater'
 
@@ -66,6 +67,8 @@ function applyProfile(): void {
     progress = loadProgress(profile)
     writeJson('last-profile.json', { profile })
     send('progress', progress)
+    // у сезонного персонажа свой список квестов (добавляются сезонные)
+    send('data', publicData())
   }
   live.profile = profile
   pushLive()
@@ -99,7 +102,7 @@ async function loadData(force = false): Promise<void> {
   if (!data || data.gameMode !== mode) {
     data = loadCached(mode)
     if (data) {
-      send('data', data)
+      send('data', publicData())
       resolveMap()
       syncFromQuests()
     }
@@ -118,7 +121,7 @@ async function loadData(force = false): Promise<void> {
       live.dataStatus = 'tarkov.dev отвечает с ошибками — часть данных из кэша, повторю через 5 минут'
       setTimeout(() => loadData(), 5 * 60 * 1000)
     }
-    send('data', data)
+    send('data', publicData())
     resolveMap()
     syncFromQuests()
   } catch (e) {
@@ -131,6 +134,26 @@ async function loadData(force = false): Promise<void> {
     loading = false
     pushLive()
   }
+}
+
+// ---------- сезонные квесты ----------
+
+// квесты сезона (KORD BREACH) с tarkov.help: показываются только сезонному персонажу
+let seasonQuests: SeasonQuest[] = []
+async function refreshSeasonQuests(): Promise<void> {
+  try {
+    seasonQuests = await getSeasonQuests()
+    if (profile === 'season') send('data', publicData())
+  } catch (e) {
+    console.warn('Сезонные квесты не загрузились:', e)
+  }
+}
+
+/** Данные для окон: сезонному персонажу к обычным квестам добавляются сезонные. */
+function publicData(): GameData | null {
+  if (!data || profile !== 'season' || !seasonQuests.length) return data
+  const d = data
+  return { ...d, tasks: [...d.tasks, ...seasonQuests.map((q) => toSeasonTask(q, d))] }
 }
 
 // ---------- обновления ----------
@@ -182,6 +205,23 @@ function setTask(id: string, status: TaskStatus | null): void {
 function raiseFromQuests(): boolean {
   if (!data) return false
   let changed = false
+  // квест нельзя взять, не выполнив предыдущие: если он взят или выполнен, то и они выполнены.
+  // Так восстанавливаются выполненные квесты, о которых логи не сообщили (например, сыграно без приложения)
+  const byId = new Map(data.tasks.map((t) => [t.id, t]))
+  const stack = data.tasks.filter((t) => progress.tasks[t.id] === 'active' || progress.tasks[t.id] === 'completed')
+  while (stack.length) {
+    const t = stack.pop()!
+    for (const r of t.requires) {
+      // только требование «предыдущий выполнен»; варианты «взят или выполнен» и «провален» не трогаем
+      if (r.status.length !== 1 || r.status[0] !== 'complete') continue
+      const st = progress.tasks[r.taskId]
+      if (st === 'completed' || st === 'failed') continue
+      progress.tasks[r.taskId] = 'completed'
+      changed = true
+      const prev = byId.get(r.taskId)
+      if (prev) stack.push(prev)
+    }
+  }
   for (const t of data.tasks) {
     const st = progress.tasks[t.id]
     if (st !== 'active' && st !== 'completed') continue
@@ -198,6 +238,72 @@ function raiseFromQuests(): boolean {
   }
   return changed
 }
+/**
+ * Пересборка квестов открытого персонажа: статусы по его событиям во всех сохранённых логах.
+ * Ничего не удаляет: логи игра хранит не все, а квесты у всех персонажей одни и те же, поэтому по логам
+ * нельзя сказать, что квест «чужой» — его мог раньше выполнить и этот персонаж.
+ */
+function rebuildPlan(): RebuildPlan {
+  const own = logs.importAll().byProfile[profile]
+  const plan: RebuildPlan = { profile, update: [], same: 0 }
+  for (const [id, st] of own) {
+    if (progress.tasks[id] === st) plan.same++
+    else plan.update.push({ id, from: progress.tasks[id] ?? null, to: st })
+  }
+  return plan
+}
+
+// ---------- события из логов, сыгранные без приложения ----------
+
+// время последнего учтённого события в логах: при запуске догоняем всё, что было позже
+// (сессии, сыгранные с закрытым приложением), а повторно уже учтённое не применяем —
+// иначе при перезапуске логи перетирали бы статусы, исправленные вручную
+const LOG_STATE = 'log-state.json'
+let seenUntil = readJson<{ seenUntil: string }>(LOG_STATE, { seenUntil: '' }).seenUntil
+function markSeen(ts: string): void {
+  if (!ts || ts <= seenUntil) return
+  seenUntil = ts
+  writeJson(LOG_STATE, { seenUntil })
+}
+
+/** Применяет события из логов после seenUntil ко всем персонажам. Возвращает, сколько квестов затронуто. */
+function catchUpLogs(): number {
+  if (!seenUntil) {
+    // первый запуск с этой функцией: прошлое не трогаем (для него есть «Пересобрать из логов»),
+    // только запоминаем, докуда логи уже есть
+    markSeen(logs.importAll().lastTs)
+    return 0
+  }
+  const { byProfile, lastTs } = logs.importAll(seenUntil)
+  let n = 0
+  for (const p of Object.keys(byProfile) as Profile[]) {
+    for (const [id, st] of byProfile[p]) {
+      setTaskFor(p, id, st)
+      n++
+    }
+  }
+  markSeen(lastTs)
+  return n
+}
+
+/** Персонаж пользовался барахолкой: она открыта, а уровень — не ниже 15-го. */
+function markFlea(p: Profile): void {
+  const apply = (pr: Progress): boolean => {
+    if (pr.fleaOpen && pr.playerLevel >= FLEA_LEVEL) return false
+    pr.fleaOpen = true
+    pr.playerLevel = Math.max(pr.playerLevel, FLEA_LEVEL)
+    return true
+  }
+  if (p === profile) {
+    if (!apply(progress)) return
+    saveProgress()
+    send('progress', progress)
+    return
+  }
+  const other = loadProgress(p)
+  if (apply(other)) writeJson(progressFile(p), other)
+}
+
 function syncFromQuests(): void {
   if (!raiseFromQuests()) return
   saveProgress()
@@ -229,8 +335,14 @@ const logs = new LogWatcher(() => settings.gamePath, {
     live.detectedMode = p
     applyProfile()
   },
-  onTask(id, status, p) {
+  onTask(id, status, p, ts) {
+    // при запуске приложение читает текущую сессию с начала — уже учтённое пропускаем
+    if (ts && ts <= seenUntil) return
     setTaskFor(p, id, status)
+    markSeen(ts)
+  },
+  onFlea(p) {
+    markFlea(p)
   },
   onStatus(text) {
     if (live.logStatus === text) return
@@ -345,7 +457,7 @@ function registerHotkeys(): void {
 // ---------- IPC ----------
 
 function registerIpc(): void {
-  ipcMain.handle('data:get', () => data)
+  ipcMain.handle('data:get', () => publicData())
   ipcMain.handle('data:refresh', () => loadData(true))
   ipcMain.handle('settings:get', () => settings)
   ipcMain.handle('settings:set', (_e, patch: Partial<Settings>) => {
@@ -413,12 +525,36 @@ function registerIpc(): void {
   })
   ipcMain.handle('progress:import', () => {
     // у каждого персонажа свои квесты: в текущего — в память, остальным — в их файлы
-    const found = logs.importAll()
-    for (const p of Object.keys(found) as Profile[]) for (const [id, st] of found[p]) setTaskFor(p, id, st)
+    const { byProfile, lastTs } = logs.importAll()
+    for (const p of Object.keys(byProfile) as Profile[]) for (const [id, st] of byProfile[p]) setTaskFor(p, id, st)
+    markSeen(lastTs)
+    for (const p of logs.fleaHistory()) markFlea(p)
     raiseFromQuests()
     saveProgress()
     send('progress', progress)
-    return found[profile].size
+    return byProfile[profile].size
+  })
+  ipcMain.handle('progress:story-choice', (_e, key: string, value: string | null) => {
+    const choices = { ...progress.storyChoices }
+    if (value) choices[key] = value
+    else delete choices[key]
+    progress.storyChoices = choices
+    saveProgress()
+    send('progress', progress)
+    return progress
+  })
+  ipcMain.handle('progress:rebuild', (_e, apply: boolean) => {
+    const plan = rebuildPlan()
+    if (apply && plan.update.length) {
+      // прежний прогресс — в отдельный файл, чтобы пересборку можно было откатить
+      plan.backup = `progress-${profile}.backup.json`
+      writeJson(plan.backup, progress)
+      for (const u of plan.update) progress.tasks[u.id] = u.to
+      raiseFromQuests()
+      saveProgress()
+      send('progress', progress)
+    }
+    return plan
   })
   ipcMain.handle('live:get', () => live)
   ipcMain.handle('live:map', (_e, map: string | null) => {
@@ -436,9 +572,12 @@ function registerIpc(): void {
 
 // ---------- запуск ----------
 
-if (!app.requestSingleInstanceLock()) app.quit()
+// вторая копия приложения сразу закрывается: её стартовый код не должен писать файлы прогресса
+const gotLock = app.requestSingleInstanceLock()
+if (!gotLock) app.quit()
 
 app.whenReady().then(() => {
+  if (!gotLock) return
   const defaults = defaultSettings()
   const saved = readJson<Partial<Settings>>('settings.json', {})
   // берём только известные поля — так из старых настроек пропадают удалённые функции (мини-карта)
@@ -463,11 +602,23 @@ app.whenReady().then(() => {
   if (firstSplit) {
     writeJson(progressFile('pvp'), loadProgress('pvp'))
     try {
-      const found = logs.importAll()
-      for (const p of ['season', 'pve'] as Profile[]) for (const [id, st] of found[p]) setTaskFor(p, id, st)
+      const { byProfile } = logs.importAll()
+      for (const p of ['season', 'pve'] as Profile[]) for (const [id, st] of byProfile[p]) setTaskFor(p, id, st)
     } catch (e) {
       console.warn('Не удалось разобрать логи при разделении прогресса:', e)
     }
+  }
+  // квесты из сессий, сыгранных, пока приложение было закрыто
+  try {
+    catchUpLogs()
+  } catch (e) {
+    console.warn('Не удалось догнать логи:', e)
+  }
+  // барахолка в старых сессиях игры: уровень персонажа не ниже 15-го
+  try {
+    for (const p of logs.fleaHistory()) markFlea(p)
+  } catch (e) {
+    console.warn('Не удалось проверить барахолку по логам:', e)
   }
   // убранные виды карты («Классика», «Хаки», «Тёмная») заменяем «Схемой»
   if (settings.mapStyle !== 'scheme' && settings.mapStyle !== 'detailed') settings.mapStyle = 'scheme'
@@ -491,6 +642,8 @@ app.whenReady().then(() => {
   // карты в докладах сопоставляются с данными игры — поэтому первый запрос после загрузки данных
   loadData().finally(refreshGoons)
   setInterval(refreshGoons, 2 * 60 * 1000) // доклады о Кочевниках приходят часто — проверяем каждые 2 минуты
+  refreshSeasonQuests()
+  setInterval(refreshSeasonQuests, 6 * 3600_000) // статья сезона дополняется — раз в сутки обновляем (кэш на сутки)
 })
 
 app.on('second-instance', () => {

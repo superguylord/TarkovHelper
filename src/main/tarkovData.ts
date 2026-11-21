@@ -9,6 +9,8 @@ import type {
   MapInfo,
   MapBoss,
   MapLayer,
+  MapLock,
+  MapLoot,
   MapPoint,
   Point3,
   Task,
@@ -369,9 +371,12 @@ async function fetchMapsRaw(mode: GameMode): Promise<{ geo: any[]; data: any; ru
 
 function buildMaps(
   { geo, data, ru }: { geo: any[]; data: any; ru: Dict },
-  itemName: (id: string) => string
+  itemName: (id: string) => string,
+  priceOf: (id: string) => number,
+  isInjector: (id: string) => boolean
 ): { maps: MapInfo[]; mapIdToName: Dict } {
   const all = Object.values<any>(data.maps)
+  const isRare = rareItems(all, priceOf)
   const mapIdToName: Dict = {}
   const mapTitle: Dict = {}
   for (const m of all) {
@@ -429,7 +434,9 @@ function buildMaps(
       svgBounds: g.svgBounds,
       extracts,
       spawns: pmcSpawns(main.spawns),
-      bosses: mapBosses(main.bosses, data.mobs ?? {}, ru)
+      bosses: mapBosses(main.bosses, data.mobs ?? {}, ru),
+      locks: mapLocks(main.locks, itemName),
+      loot: mapLoot(main, data.lootContainers ?? {}, ru, isRare, priceOf, isInjector)
     })
   }
   return { maps, mapIdToName }
@@ -453,6 +460,76 @@ function mapBosses(bosses: any[] = [], mobs: Record<string, any>, ru: Dict): Map
     out.set(name, cur)
   }
   return [...out.values()].filter((b) => b.chance > 0).sort((a, b) => b.chance - a.chance)
+}
+
+/** Запертые двери, багажники и контейнеры: где нужен какой ключ. */
+function mapLocks(locks: any[] = [], itemName: (id: string) => string): MapLock[] {
+  const out: MapLock[] = []
+  for (const l of locks) {
+    const key = typeof l.key === 'string' ? l.key : l.key?.id
+    const p = l.position
+    if (!key || !p) continue
+    const kind = l.lockType === 'trunk' || l.lockType === 'container' ? l.lockType : 'door'
+    out.push({ x: p.x, y: p.y, z: p.z, key, keyName: itemName(key), kind, power: !!l.needsPower })
+  }
+  return out
+}
+
+// контейнеры, которые считаем редким лутом (по normalizedName из данных tarkov.dev)
+const RARE_CONTAINERS = new Set(['safe', 'bank-safe', 'shturmans-stash', 'medical-supply-crate', 'technical-supply-crate'])
+const LOOSE_POOL_MAX = 8 // место с большим набором возможных предметов — обычный лут, не редкий
+// известные ценные находки — редкие при любой цене и частоте: видеокарта, разведданные, LEDX, биткоин, дефибриллятор
+const ALWAYS_RARE = new Set([
+  '57347ca924597744596b4e71',
+  '5c12613b86f7743bbe2c3f76',
+  '5c0530ee86f774697952d952',
+  '59faff1d86f7746c51718c9c',
+  '5c052e6986f7746b207bc3c9'
+])
+
+/**
+ * Какие предметы считать редкой находкой: из списка выше; дороже 300 тыс; или дороже 150 тыс и при этом
+ * встречаются не больше чем в сотне мест по всем картам — так отсекаются дорогие, но повсеместные
+ * топливные канистры, самогон и плакаты.
+ */
+function rareItems(allMaps: any[], priceOf: (id: string) => number): (id: string) => boolean {
+  const spots = new Map<string, number>()
+  for (const m of allMaps) for (const s of m.lootLoose ?? []) for (const id of new Set<string>(s.items ?? [])) spots.set(id, (spots.get(id) ?? 0) + 1)
+  return (id) => ALWAYS_RARE.has(id) || priceOf(id) >= 300_000 || (priceOf(id) >= 150_000 && (spots.get(id) ?? 0) <= 100)
+}
+
+/**
+ * Редкий лут: контейнеры из списка выше и места рассыпного лута, где набор возможных предметов
+ * небольшой и среди них есть дорогие (видеокарты, LEDX, биткоины, разведданные и т.п.).
+ */
+function mapLoot(
+  main: any,
+  containers: Record<string, any>,
+  ru: Dict,
+  isRare: (id: string) => boolean,
+  priceOf: (id: string) => number,
+  isInjector: (id: string) => boolean
+): MapLoot[] {
+  const out: MapLoot[] = []
+  for (const c of main.lootContainers ?? []) {
+    const id = typeof c.lootContainer === 'string' ? c.lootContainer : c.lootContainer?.id
+    const info = containers[id]
+    const p = c.position
+    if (!info || !p || !RARE_CONTAINERS.has(info.normalizedName)) continue
+    out.push({ x: p.x, y: p.y, z: p.z, kind: 'container', name: tr(ru, info.name), items: [] })
+  }
+  for (const s of main.lootLoose ?? []) {
+    const pool: string[] = s.items ?? []
+    const p = s.position
+    if (!p || !pool.length || pool.length > LOOSE_POOL_MAX) continue
+    const byPrice = (ids: string[]) => ids.sort((a, b) => priceOf(b) - priceOf(a)).slice(0, 4)
+    const rare = pool.filter(isRare)
+    if (rare.length) out.push({ x: p.x, y: p.y, z: p.z, kind: 'loose', name: '', items: byPrice(rare) })
+    // инъекторы — отдельная категория со своей кнопкой на карте
+    const injectors = pool.filter(isInjector)
+    if (injectors.length) out.push({ x: p.x, y: p.y, z: p.z, kind: 'injector', name: '', items: byPrice(injectors) })
+  }
+  return out
 }
 
 /**
@@ -675,7 +752,7 @@ function itemsUsedInTasks(tasks: any[]): Map<string, string[]> {
 // версия в имени: при смене формата данных старый кэш просто не читается
 const cacheName = (mode: GameMode) => `gamedata-v${CACHE_VERSION}-${mode}.json`
 
-const CACHE_VERSION = 14
+const CACHE_VERSION = 17
 
 export function loadCached(mode: GameMode): GameData | null {
   for (let v = CACHE_VERSION; v >= 2; v--) {
@@ -756,7 +833,17 @@ export async function fetchGameData(
   if (tasksV) for (const q of Object.values<any>(tasksV.data.questItems ?? {})) names.set(q.id, tr(tasksV.ru, q.name))
   const itemName = (id: string) => names.get(id) ?? id
 
-  const mapsV = maps.status === 'fulfilled' ? buildMaps(maps.value, itemName) : null
+  // цены — чтобы отобрать «редкий лут» на картах
+  const prices = new Map<string, number>()
+  for (const i of same?.items ?? []) prices.set(i.id, i.avg24hPrice ?? i.lastLowPrice ?? i.basePrice ?? 0)
+  if (itemsV) for (const i of Object.values<any>(itemsV.data.items)) prices.set(i.id, i.avg24hPrice || i.lastLowPrice || i.basePrice || 0)
+  const priceOf = (id: string) => prices.get(id) ?? 0
+  // инъекторы (тип предмета в данных) — для отметок на картах
+  const injectors = new Set<string>()
+  if (itemsV) for (const i of Object.values<any>(itemsV.data.items)) if ((i.types ?? []).includes('injectors')) injectors.add(i.id)
+  const isInjector = (id: string) => injectors.has(id)
+
+  const mapsV = maps.status === 'fulfilled' ? buildMaps(maps.value, itemName, priceOf, isInjector) : null
   const rawTasks = tasksV ? Object.values<any>(tasksV.data.tasks) : []
   const usedIn = itemsUsedInTasks(rawTasks)
   const taskNames: Dict = {}

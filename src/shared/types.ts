@@ -34,6 +34,20 @@ export interface MapLabel {
   rotation?: number // поворот в градусах (названия улиц)
 }
 
+export interface MapLock extends Point3 {
+  key: string // id ключа
+  keyName: string
+  kind: 'door' | 'trunk' | 'container'
+  power: boolean // открывается только при включённом электричестве
+}
+
+export interface MapLoot extends Point3 {
+  // container — сейф/ящик; loose — редкая находка; injector — инъекторы
+  kind: 'container' | 'loose' | 'injector'
+  name: string // название контейнера; у рассыпного лута — пусто
+  items: string[] // id предметов этой категории, которые тут могут лежать (у рассыпного лута)
+}
+
 export interface MapBoss {
   name: string
   chance: number // 0..1
@@ -60,6 +74,8 @@ export interface MapInfo {
   labels: MapLabel[] // подписи районов и зданий
   spawns?: Point3[] // спауны ЧВК (близкие точки одного места слиты в одну)
   bosses?: MapBoss[] // боссы локации с шансом появления
+  locks?: MapLock[] // запертые двери, багажники и контейнеры с ключами
+  loot?: MapLoot[] // редкий лут: сейфы, ящики снабжения и места, где может лежать дорогой предмет
   tilePath?: string
   tileSize?: number
   minZoom?: number
@@ -116,6 +132,8 @@ export interface Task {
   requires: { taskId: string; status: string[] }[]
   neededKeys: { map: string | null; keys: string[] }[] // ключи, которые понадобятся, по картам
   objectives: TaskObjective[]
+  season?: string // сезонный квест (например, KORD BREACH) — данные с tarkov.help, статус вручную
+  guideSlug?: string // адрес гайда на tarkov.help, если известен заранее
 }
 
 export interface Item {
@@ -190,6 +208,18 @@ export interface Progress {
   objectives: Record<string, boolean> // цели, отмеченные выполненными вручную
   hideout: Record<string, number> // построенный уровень модуля убежища
   traders?: Record<string, number> // уровень лояльности торговца (по имени); не задан — 1
+  fleaOpen?: boolean // в логах видно, что персонаж пользовался барахолкой — значит, она открыта
+  storyChoices?: Record<string, string> // решения в сюжете: что сделано с кейсом, Керманом, Смотрителем
+}
+
+export const FLEA_LEVEL = 15 // с этого уровня открывается барахолка
+
+/** Что изменит пересборка квестов персонажа по логам игры. */
+export interface RebuildPlan {
+  profile: Profile
+  update: { id: string; from: TaskStatus | null; to: TaskStatus }[] // статус в логах этого персонажа другой
+  same: number // квесты, у которых статус уже совпадает с логами
+  backup?: string // куда сохранён прежний прогресс (после применения)
 }
 
 export interface Hotkeys {
@@ -284,6 +314,8 @@ export interface Api {
   checkUpdate(): Promise<void>
   installUpdate(): Promise<void>
   importFromLogs(): Promise<number>
+  rebuildFromLogs(apply: boolean): Promise<RebuildPlan>
+  setStoryChoice(key: string, value: string | null): Promise<Progress>
   getLive(): Promise<LiveState>
   setCurrentMap(map: string | null): Promise<void>
   checkPrice(): Promise<void>

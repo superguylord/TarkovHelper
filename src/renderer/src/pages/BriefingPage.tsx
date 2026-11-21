@@ -7,14 +7,23 @@ const GOONS_REPORT_MS = 12 * 3600_000 // доклад старше 12 часов
 import type { AppState } from '../useAppState'
 import type { Nav } from '../MainApp'
 import { questState } from '../questLogic'
-import { FLEA_LEVEL, buildPlan, mapPriority, sellingTraders } from '../raidPlan'
+import { FLEA_LEVEL, buildPlan, fleaOpen, mapPriority, sellingTraders } from '../raidPlan'
 
-// предметы, которые у игрока уже есть (отмечаются вручную в плане рейда)
-function loadOwned(profile: string): string[] {
+// отметки в плане рейда, у каждого персонажа свои:
+// ownedItems — предмет уже есть; lostItems — предмета нет (например, потерян в рейде), а купить негде
+type ItemList = 'ownedItems' | 'lostItems'
+function loadList(list: ItemList, profile: string): string[] {
   try {
-    return JSON.parse(localStorage.getItem(`ownedItems:${profile}`) ?? '[]')
+    return JSON.parse(localStorage.getItem(`${list}:${profile}`) ?? '[]')
   } catch {
     return []
+  }
+}
+function saveList(list: ItemList, profile: string, items: string[]): void {
+  try {
+    localStorage.setItem(`${list}:${profile}`, JSON.stringify(items))
+  } catch {
+    // без сохранения отметка проживёт до закрытия окна
   }
 }
 
@@ -72,8 +81,12 @@ export function BriefingPage({ s, nav }: { s: AppState; nav: Nav }) {
   const priority = useMemo(() => (data ? mapPriority(data, progress) : []), [data, progress])
   const [selected, setSelected] = useState<string | null>(null)
   const profile = live?.profile ?? 'pvp'
-  const [owned, setOwned] = useState<string[]>(() => loadOwned(profile))
-  useEffect(() => setOwned(loadOwned(profile)), [profile])
+  const [owned, setOwned] = useState<string[]>(() => loadList('ownedItems', profile))
+  const [lost, setLost] = useState<string[]>(() => loadList('lostItems', profile))
+  useEffect(() => {
+    setOwned(loadList('ownedItems', profile))
+    setLost(loadList('lostItems', profile))
+  }, [profile])
   const traders = useMemo(() => (data ? sellingTraders(data) : []), [data])
 
   // по умолчанию — карта, на которой игрок сейчас, иначе самая выгодная
@@ -101,22 +114,22 @@ export function BriefingPage({ s, nav }: { s: AppState; nav: Nav }) {
       : { ...b, chance: 0, note: `Сейчас на другой локации: ${seen.mapName}, доклад ${timeAgo(seen.at)} (tarkov.help)` }
   })
 
-  const makePlan = () => nav.setPlan(buildPlan(data, map, progress, new Set(owned)))
+  const plan = (p = progress, o = owned, l = lost) => buildPlan(data, map, p, new Set(o), new Set(l))
+  const makePlan = () => nav.setPlan(plan())
   const shownPlan = nav.plan && nav.plan.map === map.normalizedName ? nav.plan : null
-  // «у меня есть»: предмет больше не мешает квесту — план пересобирается сразу
-  const markOwned = (name: string) => {
-    const next = [...new Set([...owned, name])]
-    setOwned(next)
-    try {
-      localStorage.setItem(`ownedItems:${profile}`, JSON.stringify(next))
-    } catch {
-      // без сохранения отметка проживёт до закрытия окна
-    }
-    nav.setPlan(buildPlan(data, map, progress, new Set(next)))
+  // отметки сразу пересобирают план: «у меня есть» возвращает квест в план, «нету» — убирает
+  const setMarks = (o: string[], l: string[]) => {
+    setOwned(o)
+    setLost(l)
+    saveList('ownedItems', profile, o)
+    saveList('lostItems', profile, l)
+    nav.setPlan(plan(progress, o, l))
   }
+  const markOwned = (name: string) => setMarks([...new Set([...owned, name])], lost.filter((n) => n !== name))
+  const markLost = (name: string) => setMarks(owned.filter((n) => n !== name), [...new Set([...lost, name])])
   const setTrader = async (name: string, level: number) => {
     const p = await window.api.setTraderLevel(name, level)
-    if (shownPlan) nav.setPlan(buildPlan(data, map, p, new Set(owned)))
+    if (shownPlan) nav.setPlan(plan(p))
   }
 
   return (
@@ -210,7 +223,7 @@ export function BriefingPage({ s, nav }: { s: AppState; nav: Nav }) {
         </div>
 
         <div className="my-traders">
-          <span className="muted small" title="В логах игры нет вашего уровня и лояльности. Приложение само поднимает их до требований взятых и выполненных квестов; точные значения поправьте здесь.">
+          <span className="muted small" title="Точного уровня и лояльности в логах игры нет. Приложение само поднимает их до требований взятых квестов, а уровень — до 15-го, если персонаж уже заходил на барахолку. Точные значения поправьте здесь.">
             Что могу купить ·
           </span>
           <label className="trader-lvl">
@@ -222,12 +235,12 @@ export function BriefingPage({ s, nav }: { s: AppState; nav: Nav }) {
               value={progress.playerLevel}
               onChange={async (e) => {
                 const p = await window.api.setPlayerLevel(Math.max(1, Math.min(79, Number(e.target.value) || 1)))
-                if (shownPlan) nav.setPlan(buildPlan(data, map, p, new Set(owned)))
+                if (shownPlan) nav.setPlan(plan(p))
               }}
             />
           </label>
           <span className="muted small">
-            {progress.playerLevel >= FLEA_LEVEL ? 'барахолка открыта' : `барахолка с ${FLEA_LEVEL} уровня`} · лояльность:
+            {fleaOpen(progress) ? 'барахолка открыта' : `барахолка с ${FLEA_LEVEL} уровня`} · лояльность:
           </span>
           {traders.map((t) => (
             <label key={t} className="trader-lvl">
@@ -259,7 +272,16 @@ export function BriefingPage({ s, nav }: { s: AppState; nav: Nav }) {
                     <div className="bring-meta">
                       {KIND_LABEL[b.kind]} · {b.purposes.join(', ')}
                     </div>
-                    {b.source && <div className="bring-source">{b.source}</div>}
+                    <div className="bring-foot">
+                      <span className="bring-source">{b.source}</span>
+                      <button
+                        className="btn btn-small"
+                        onClick={() => markLost(b.name)}
+                        title="Этого предмета нет (например, потерян в рейде), а купить сейчас негде — задание уйдёт в «Пока не выполнить»"
+                      >
+                        Нету
+                      </button>
+                    </div>
                   </div>
                 ))}
               </div>
@@ -268,8 +290,8 @@ export function BriefingPage({ s, nav }: { s: AppState; nav: Nav }) {
               <div className="blocked">
                 <div className="row-title">Пока не выполнить · {shownPlan.blocked.length}</div>
                 <p className="muted small">
-                  Для этих заданий нужен предмет, который вы сейчас не можете купить. В план они не входят. Если предмет
-                  уже лежит в схроне, нажмите «У меня есть».
+                  Для этих заданий нужен предмет, которого у вас нет и который сейчас не купить. В план они не входят.
+                  Если предмет снова появился в схроне, нажмите «У меня есть».
                 </p>
                 {shownPlan.blocked.map((q) => (
                   <div key={q.quest} className="blocked-quest">

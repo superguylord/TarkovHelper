@@ -215,6 +215,9 @@ input:focus, select:focus { border-color: var(--brass); }
 /* спауны ЧВК: на общем виде карты прячем, появляются при приближении */
 .spawn-icon svg { filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.6)); cursor: default; }
 .spawns-hidden .spawn-icon { display: none; }
+/* ключи и редкий лут: тоже только на приближенной карте */
+.poi-icon svg { filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.6)); cursor: default; }
+.pois-hidden .poi-icon { display: none; }
 .zone { stroke-width: 1.5; fill-opacity: 0.12; }
 .zone-quest { stroke: var(--brass); fill: var(--brass); }
 .zone-quest-selected { stroke: #ff9d3c; fill: #ff9d3c; fill-opacity: 0.22; stroke-width: 2.5; }
@@ -624,7 +627,10 @@ input:focus, select:focus { border-color: var(--brass); }
 .trader-lvl { display: inline-flex; align-items: center; gap: 5px; font-size: 12.5px; color: var(--text-muted); }
 .trader-lvl input { width: 52px; padding: 1px 4px; background: var(--panel-2); color: var(--text); border: 1px solid var(--line-strong); border-radius: 5px; font: inherit; }
 .trader-lvl select { padding: 1px 2px; background: var(--panel-2); color: var(--text); border: 1px solid var(--line-strong); border-radius: 5px; font: inherit; }
-.bring-source { margin-top: 2px; font-size: 12px; color: var(--green); }
+.bring-source { font-size: 12px; color: var(--green); }
+.bring-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 4px; min-height: 22px; }
+.bring-foot .btn-small { padding: 2px 8px; font-size: 11.5px; opacity: 0.75; }
+.bring-foot .btn-small:hover { opacity: 1; }
 .blocked { margin: 12px 0; }
 .blocked-quest { padding: 8px 10px; margin-top: 6px; background: var(--panel-2); border: 1px dashed var(--line-strong); border-radius: var(--radius-sm); }
 .blocked-item { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 4px; font-size: 12.5px; }
@@ -654,6 +660,54 @@ input:focus, select:focus { border-color: var(--brass); }
 .story-node.dim { opacity: 0.45; }
 .story-node.done button { color: var(--text-dim); text-decoration: line-through; }
 .story-goals { margin: 6px 0 12px; padding-left: 18px; color: var(--text-muted); font-size: 13px; }
+
+/* пересборка квестов персонажа по логам */
+.rebuild { margin: 0 0 12px; padding: 12px 14px; background: var(--panel); border: 1px solid var(--brass); border-radius: var(--radius-md); }
+.rebuild .row-title { margin: 0 0 6px; }
+.rebuild p { margin: 6px 0; font-size: 13px; }
+.rebuild-list {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 2px 24px;
+  margin: 4px 0 8px; padding-left: 18px; max-height: 240px; overflow-y: auto; overflow-x: hidden; font-size: 13px;
+}
+.rebuild-list li { margin: 1px 0; }
+
+/* сезонные квесты */
+.tag-season { color: #e0a26a; border-color: #7a5536; }
+
+/* ---------- сюжет: маршрут к концовке ---------- */
+.story-route-link {
+  display: block; width: 100%; margin-bottom: 14px; padding: 9px 12px; text-align: left; cursor: pointer;
+  font: inherit; font-weight: 600; color: var(--text); background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius-sm);
+}
+.story-route-link:hover { border-color: var(--line-strong); }
+.story-route-link.active { border-color: var(--brass); background: var(--panel-3); box-shadow: inset 3px 0 0 var(--brass); }
+.route { max-width: 980px; }
+.route > .muted { margin: 4px 0 6px; font-size: 13px; }
+.decisions { display: flex; flex-direction: column; gap: 8px; margin-bottom: 8px; }
+.decision { padding: 10px 12px; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius-sm); display: flex; flex-direction: column; gap: 7px; }
+.decision-head { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; }
+.decision .seg { width: fit-content; flex-wrap: wrap; }
+.link-btn { padding: 0; border: none; background: none; font: inherit; font-size: 12.5px; color: var(--brass); cursor: pointer; }
+.link-btn:hover { color: var(--brass-strong); text-decoration: underline; }
+.route-summary { margin: 4px 0 10px; padding: 8px 12px; border-left: 3px solid var(--brass); background: rgba(196, 166, 101, 0.08); font-size: 13.5px; }
+.ending-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 8px; margin-bottom: 12px; }
+.ending-card { padding: 10px 12px; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius-sm); cursor: pointer; }
+.ending-card:hover { border-color: var(--line-strong); }
+.ending-card.target { border-color: var(--brass); background: var(--panel-3); box-shadow: inset 3px 0 0 var(--brass); }
+.ending-card.st-closed { opacity: 0.55; }
+.ending-card-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 6px; }
+.ending-state-on-path { color: #b6c58a; border-color: #6b7a45; }
+.ending-state-closed { color: var(--danger); border-color: #6e3d36; }
+.ending-needs { list-style: none; margin: 0; padding: 0; font-size: 12.5px; color: var(--text-muted); }
+.ending-needs li { margin: 2px 0; }
+.ending-needs li.ok { color: #b6c58a; }
+.ending-needs li.bad { color: var(--danger); }
+.ending-needs li.warn { color: var(--amber); }
+.need-mark { display: inline-block; width: 12px; font-weight: 700; }
+.ending-closed { margin-top: 6px; color: var(--danger); }
+.ending-prep { padding: 10px 12px; background: var(--panel); border: 1px solid var(--brass); border-radius: var(--radius-sm); }
+.ending-prep .eyebrow { margin-top: 0; }
+.ending-prep .check { margin: 5px 0; color: var(--text); font-size: 13px; }
 
 /* ---------- обновления ---------- */
 .update-note { padding: 0 4px; }

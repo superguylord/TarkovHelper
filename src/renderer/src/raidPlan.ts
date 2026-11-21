@@ -1,4 +1,5 @@
 import type { BringItem, GameData, Item, MapInfo, Progress } from '@shared/types'
+import { FLEA_LEVEL } from '@shared/types'
 import { questsOnMap } from './mapMarkers'
 import { rub } from './questLogic'
 
@@ -21,7 +22,8 @@ export interface RaidPlan {
   blocked: BlockedQuest[]
 }
 
-export const FLEA_LEVEL = 15 // с этого уровня открывается барахолка
+export { FLEA_LEVEL }
+export const fleaOpen = (progress: Progress) => !!progress.fleaOpen || progress.playerLevel >= FLEA_LEVEL
 
 /** Сколько взятых квестов с незакрытыми целями на каждой карте — по убыванию. */
 export function mapPriority(data: GameData, progress: Progress): { map: MapInfo; quests: number }[] {
@@ -47,7 +49,7 @@ export function availability(item: Item, data: GameData, progress: Progress): Av
   const offer = item.buyFrom.find((o) => o.level <= level(o.trader) && unlocked(o.taskUnlock))
   if (offer) return { ok: true, source: `${offer.trader}, ур. ${offer.level} · ${rub(offer.priceRUB)}` }
   const flea = item.avg24hPrice ?? item.lastLowPrice
-  if (flea != null && progress.playerLevel >= FLEA_LEVEL) return { ok: true, source: `Барахолка · ~${rub(flea)}` }
+  if (flea != null && fleaOpen(progress)) return { ok: true, source: `Барахолка · ~${rub(flea)}` }
 
   const reasons: string[] = []
   const nearest = [...item.buyFrom].sort((a, b) => a.level - b.level)[0]
@@ -65,9 +67,17 @@ export function availability(item: Item, data: GameData, progress: Progress): Av
 /**
  * План на рейд: что взять с собой для взятых квестов на этой карте.
  * Квест, для которого нужный предмет сейчас не купить, в план не идёт (и его предметы тоже) —
- * он попадает в blocked. owned — названия предметов, которые у игрока уже есть.
+ * он попадает в blocked. owned — названия предметов, которые у игрока уже есть; lost — которых у него нет
+ * (например, потерял в рейде) и купить их сейчас негде (эта отметка сильнее того, что «продаётся у торговца»:
+ * у торговца мог кончиться лимит или товар).
  */
-export function buildPlan(data: GameData, map: MapInfo, progress: Progress, owned: ReadonlySet<string> = new Set()): RaidPlan {
+export function buildPlan(
+  data: GameData,
+  map: MapInfo,
+  progress: Progress,
+  owned: ReadonlySet<string> = new Set(),
+  lost: ReadonlySet<string> = new Set()
+): RaidPlan {
   const itemByName = new Map(data.items.map((i) => [i.name, i]))
   const checked = new Map<string, Availability>()
   // предмет «А или Б» доступен, если доступен любой из вариантов; чего нет в базе — не проверяем
@@ -75,7 +85,8 @@ export function buildPlan(data: GameData, map: MapInfo, progress: Progress, owne
     const key = `${b.kind}:${b.name}`
     let res = checked.get(key)
     if (!res) {
-      if (owned.has(b.name)) res = { ok: true, source: 'уже есть' }
+      if (lost.has(b.name)) res = { ok: false, reason: 'нет в наличии, купить сейчас негде' }
+      else if (owned.has(b.name)) res = { ok: true, source: 'уже есть' }
       else if (b.kind === 'questItem') res = { ok: true, source: 'квестовый предмет' }
       else {
         const variants = b.name.split(' или ').map((n) => itemByName.get(n))

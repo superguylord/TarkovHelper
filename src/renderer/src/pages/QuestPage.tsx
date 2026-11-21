@@ -30,7 +30,7 @@ export function QuestPage({ task, progress, map, onBack, onShowOnMap }: Props) {
         </section>
         <section className="quest-page-guide">
           <div className="eyebrow">Как выполнить · tarkov.help</div>
-          <GuideView taskName={task.name} />
+          <GuideView taskName={task.name} slug={task.guideSlug} />
         </section>
       </div>
     </div>

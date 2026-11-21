@@ -9,7 +9,8 @@ export interface LogEvents {
   onMap(nameId: string): void
   onRaid(inRaid: boolean): void
   onMode(profile: Profile): void
-  onTask(taskId: string, status: TaskStatus, profile: Profile): void
+  onTask(taskId: string, status: TaskStatus, profile: Profile, ts: string): void
+  onFlea(profile: Profile): void
   onStatus(text: string): void
 }
 
@@ -31,6 +32,14 @@ function readSwitches(text: string, into: Switches): void {
     const p = HOST_PROFILE[m[2]]
     if (into[into.length - 1]?.[1] !== p) into.push([m[1], p])
   }
+}
+
+// Запросы к барахолке: игра шлёт их, только когда барахолка открыта (с 15 уровня). Своего уровня
+// в логах нет, а это надёжный знак, что персонаж уже не ниже 15-го.
+const FLEA_RE = /https?:\/\/gw-(pvp-season|pvp|pve)\.escapefromtarkov\.com\/client\/ragfair\//g
+
+function fleaProfiles(text: string): Profile[] {
+  return [...new Set([...text.matchAll(FLEA_RE)].map((m) => HOST_PROFILE[m[1]]))]
 }
 
 /** Какой персонаж был активен в момент ts (время в логах сравнивается как строки). */
@@ -79,6 +88,7 @@ export class LogWatcher {
   private timer: NodeJS.Timeout | null = null
   private inRaid = false
   private switches: Switches = [] // смены персонажа в текущей сессии игры
+  private fleaSeen = new Set<Profile>()
   private pushTs = ''
 
   constructor(
@@ -97,18 +107,37 @@ export class LogWatcher {
     this.timer = null
   }
 
-  /** Проходит по всем сохранённым логам и возвращает итоговые статусы квестов — отдельно для каждого персонажа. */
-  importAll(): Record<Profile, Map<string, TaskStatus>> {
-    const result: Record<Profile, Map<string, TaskStatus>> = { pvp: new Map(), season: new Map(), pve: new Map() }
+  /** Персонажи, которые хоть раз пользовались барахолкой, — по всем сохранённым логам. */
+  fleaHistory(): Set<Profile> {
+    const result = new Set<Profile>()
+    for (const dir of logDirs(this.gamePath())) {
+      for (const f of readdirSync(dir).filter((f) => f.includes('backend'))) {
+        for (const p of fleaProfiles(readTail(join(dir, f), 0).text)) result.add(p)
+      }
+    }
+    return result
+  }
+
+  /**
+   * Проходит по сохранённым логам и возвращает итоговые статусы квестов — отдельно для каждого персонажа.
+   * since — время из логов: события до него (включительно) пропускаются. lastTs — время последнего события.
+   */
+  importAll(since = ''): { byProfile: Record<Profile, Map<string, TaskStatus>>; lastTs: string } {
+    const byProfile: Record<Profile, Map<string, TaskStatus>> = { pvp: new Map(), season: new Map(), pve: new Map() }
+    let lastTs = since
     for (const dir of logDirs(this.gamePath())) {
       const files = readdirSync(dir)
       const switches: Switches = []
       for (const f of files.filter((f) => f.includes('backend'))) readSwitches(readTail(join(dir, f), 0).text, switches)
       for (const f of files.filter((f) => f.includes('push-notifications'))) {
-        parseTaskEvents(readTail(join(dir, f), 0).text, (id, st, ts) => result[profileAt(switches, ts)].set(id, st))
+        parseTaskEvents(readTail(join(dir, f), 0).text, (id, st, ts) => {
+          if (since && ts <= since) return
+          byProfile[profileAt(switches, ts)].set(id, st)
+          if (ts > lastTs) lastTs = ts
+        })
       }
     }
-    return result
+    return { byProfile, lastTs }
   }
 
   private tick(): void {
@@ -125,6 +154,7 @@ export class LogWatcher {
       this.pending.clear()
       this.switches = []
       this.pushTs = ''
+      this.fleaSeen.clear()
       this.ev.onStatus(`Слежу за логами: ${latest.split(/[\\/]/).pop()}`)
     }
     let files: string[]
@@ -158,13 +188,18 @@ export class LogWatcher {
   private handle(kind: 'app' | 'push' | 'backend', text: string): void {
     if (kind === 'push') {
       // квест относится к персонажу, который был активен в момент уведомления (backend-лог читается раньше)
-      this.pushTs = parseTaskEvents(text, (id, st, ts) => this.ev.onTask(id, st, profileAt(this.switches, ts)), this.pushTs)
+      this.pushTs = parseTaskEvents(text, (id, st, ts) => this.ev.onTask(id, st, profileAt(this.switches, ts), ts), this.pushTs)
       return
     }
     if (kind === 'backend') {
       const before = this.switches.length
       readSwitches(text, this.switches)
       if (this.switches.length > before) this.ev.onMode(this.switches[this.switches.length - 1][1])
+      for (const p of fleaProfiles(text)) {
+        if (this.fleaSeen.has(p)) continue
+        this.fleaSeen.add(p)
+        this.ev.onFlea(p)
+      }
       return
     }
     for (const line of text.split('\n')) {
